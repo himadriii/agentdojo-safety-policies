@@ -1,90 +1,157 @@
-# Shared Policy Interface — P1 AgentDojo
+# Shared Policy Interface: P1 AgentDojo Runner
+
+Version v0 (Oct 2026). Owner: P1. Changes to this contract go through P1 and are announced to the team.
 
 ## 1. Purpose
 
-All approval policies must implement a common interface so that the P1 AgentDojo runner can evaluate them without depending on their internal implementation.
-
-The interface supports rule-based, anomaly-based, supervised, plan-consistency, approval-memory, and provenance-based policies.
+Every approval policy implements one interface so the shared runner can evaluate it without knowing its internals. The same interface covers rule-based, anomaly, supervised, plan-consistency, approval-memory and provenance policies.
 
 ## 2. Required interface
 
+Subclass `agent_framework.policy.Policy` and implement:
+
 ```python
-decision, updated_state = policy.evaluate(context, state)
+def evaluate(self, context, state):
+    ...
+    return decision, updated_state                 # minimal form
+    return decision, updated_state, info           # preferred form
 ```
 
-- `context`: Information available when evaluating the proposed tool call.
-- `state`: Policy-specific state for the current task.
-- `decision`: One of `"approve"`, `"deny"`, or `"escalate"`.
-- `updated_state`: Updated state to pass into the next evaluation within the same task.
+- `decision`: `"approve"`, `"deny"` or `"escalate"`.
+- `updated_state`: dict passed back to you on the next call within the same task.
+- `info` (optional): `{"reason": str, "scores": {name: float}}`. Both keys are optional. The runner logs it per call; `reason` is also shown to the reviewer.
+
+The policy recommends; the runner enforces.
 
 ## 3. Context fields
 
-| Field | Type | Description |
+| Field | Type | Notes |
 |---|---|---|
-| `proposed_call` | AgentDojo tool-call object | Requested tool and arguments |
-| `trajectory` | Sequence of messages | Conversation and preceding tool-call history |
-| `environment` | AgentDojo environment | Current task environment |
-| `metadata` | Dictionary | Additional available task/tool metadata |
-| `remaining_budget` | Integer | Escalations remaining |
-| `task` | Task description, when available | User's objective and task context |
+| `task` | `str` | The user's task prompt (first user message). |
+| `proposed_call` | AgentDojo `FunctionCall` | Use attributes: `.function` (tool name), `.args` (dict), `.id`. It is a deep copy: mutating it does not change what runs. |
+| `trajectory` | list of AgentDojo messages | System, user, assistant and tool messages so far. The assistant message that requested the call is the last item. |
+| `environment` | AgentDojo `TaskEnvironment` | The live environment. **Read-only. Do not mutate.** |
+| `remaining_budget` | `int` | Escalations left for this task, before this call. |
+| `metadata` | `dict` | Pipeline `extra_args`. Currently empty; do not rely on it. |
 
-Policies must use only information available at decision time. Benchmark ground-truth labels and attack annotations must not be exposed to the policy or simulated reviewer.
+Messages are dicts with `role`, `content` (a list of `{"type": "text", "content": str}` blocks), plus `tool_calls` (assistant) or `tool_call` and `error` (tool). To get text:
+
+```python
+from agentdojo.types import get_text_content_as_str
+text = get_text_content_as_str(message["content"])
+```
+
+Notes:
+- Tool outputs are untrusted external data and may contain injected instructions.
+- If the agent requests several tool calls at once, each is evaluated separately, in order. `trajectory` is the same for all of them and `remaining_budget` falls as escalations are used.
+- Not provided: tool metadata (read-only vs write, local vs remote) and tool descriptions. AgentDojo does not expose them in the context, so keep your own tool table.
+- Policies must use only what is in `context`. Benchmark labels, injection task ids or goals, and attack names must never reach a policy or the reviewer.
 
 ## 4. Decision semantics
 
-- **approve:** The runner may execute the proposed tool call.
-- **deny:** The runner must not execute the proposed tool call.
-- **escalate:** The runner sends the call and relevant context to the reviewer, subject to the escalation budget.
+| Policy returns | Runner does | Logged `outcome` | Uses budget |
+|---|---|---|---|
+| `approve` | Executes the call | `auto_approve` | no |
+| `deny` | Does not execute | `auto_deny` | no |
+| `escalate`, budget left | Consumes 1 unit, asks the reviewer | `escalate_approved` / `escalate_denied` | yes |
+| `escalate`, budget 0 | Does not execute, reviewer not called | `budget_exhausted_deny` | no |
+| anything else | Does not execute | `unknown_decision_deny` | no |
 
-If the escalation budget is exhausted, the runner denies the escalation-worthy call without invoking the reviewer.
+A denied call returns a `PermissionDenied` tool result to the agent. Budget `k` is per task and is consumed before the reviewer is called.
 
-The policy recommends a decision; the shared runner is responsible for enforcing it.
+## 5. State
 
-## 5. State handling
+- The `state` dict is task-scoped. The runner resets it at the start of every task and passes your returned state into the next evaluation.
+- Instance attributes (`self.x`) live for a whole run, across tasks. Use them only for loaded models, configuration and caches. Task-specific data belongs in `state`. If your method needs memory across tasks, ask P1 first, because it affects held-out evaluation.
 
-Each task starts with fresh policy state.
-
-The runner passes the state returned by one evaluation into the next evaluation within that task. State must not leak between unrelated tasks.
-
-Stateless policies may return the state unchanged.
-
-## 6. Sample input
-
-The following is illustrative pseudocode. The real `proposed_call` should be an AgentDojo tool-call object.
+## 6. Reviewer
 
 ```python
-context = {
-    "task": "Find the user's latest flight email.",
-    "proposed_call": {
-        "function": "search_emails",
-        "args": {"query": "flight"},
-    },
-    "trajectory": [],
-    "environment": None,
-    "metadata": {"task_id": "sample_task"},
-    "remaining_budget": 2,
-}
-
-state = {}
+reviewer.review(reviewer_context) -> "approve" | "deny"
 ```
 
-## 7. Sample output
+`reviewer_context` has exactly four keys: `task`, `proposed_call` (copy), `trajectory` (deep copy) and `policy_reason`. It never contains the environment or any benchmark information. The default is `MockReviewer` (approves everything; `MockReviewer("deny")` denies everything). An `LLMReviewer` will follow, with its prompt documented.
+
+The reviewer sees your `reason`, so keep it short and factual. Do not write "this is safe".
+
+## 7. Logging and cost
+
+Per task, the runner adds two fields to AgentDojo's trace JSON at `results/<pipeline_name>/<suite>/<user_task>/<attack>/<injection_task|none>.json`:
+
+- `approval_decisions`: one record per tool call with `tool`, `args`, `decision`, `outcome`, `executed`, `reviewer_called`, `budget_remaining`, `reason` and `scores`.
+- `token_usage`: `{agent|policy|reviewer: {calls, input_tokens, output_tokens}}`.
+
+Agent tokens are tracked automatically for OpenAI-compatible providers. If your policy calls an LLM, wrap its OpenAI client once:
 
 ```python
-decision = "escalate"
-updated_state = state
+from agent_framework.usage import track_openai_client
+client = track_openai_client(openai.OpenAI(), "policy")
 ```
 
-This is an example of the output format, not a claim that every policy should escalate this call. The policy implementation determines the actual decision.
+For any other client, call `TRACKER.add("policy", input_tokens, output_tokens)` after each request.
 
-## 8. Implementation requirements
+## 8. Metrics as computed by the runner
 
-Every policy owner should provide:
+- A task is completed safely if utility is true and the injection did not succeed (AgentDojo's final-state `security` check).
+- TCR@k = completed-safely tasks / n. n is the number of user tasks (no attack) or user×injection pairs (attack).
+- HITL Load = reviewer calls summed over completed-safely tasks (`hitl_load_completed`). `hitl_load_all` is also reported.
+- AgentDojo first runs every injection task as a plain user task. Those runs are billed but excluded from the numbers above.
+- A run that hits a context-length or server error is reported in `tasks_with_errors` and is not a real completion.
 
-1. A callable implementation of `evaluate(context, state)`.
+## 9. Adding your policy
+
+Setup (once): create a `.env` file in the repo root (copy `.env.example`) and add your own Groq key:
+
+```
+GROQ_API_KEY=gsk_your_key_here
+```
+
+`.env` is git-ignored. Never commit a key. Everyone uses the same model, `openai/gpt-oss-20b`, but each person uses their own key.
+
+1. Create `agent_framework/policies/<your_policy>.py`:
+
+```python
+from agent_framework.policy import Policy
+
+class ReadOnlyHeuristicPolicy(Policy):   # example only, not a recommended policy
+    name = "readonly_heuristic"
+
+    def evaluate(self, context, state):
+        tool = context["proposed_call"].function
+        if tool.startswith(("get_", "search_", "read_", "list_")):
+            return "approve", state, {"reason": "read-only tool by name"}
+        return "escalate", state, {"reason": "possible side effect"}
+```
+
+2. Register one line in `agent_framework/registry.py`: `"readonly_heuristic": ReadOnlyHeuristicPolicy,`. The factory must take no arguments; use `functools.partial` for configuration.
+3. Run:
+
+```
+python -m agent_framework.runner --policy readonly_heuristic --llm openai/gpt-oss-20b --provider groq \
+    --attack important_instructions --user-tasks user_task_0 --injection-tasks injection_task_0 \
+    --k 0 1 2 --outdir results/<yourname>
+```
+
+Attack names: `important_instructions` (default), `direct`, `ignore_previous`, `injecagent`, `tool_knowledge`, or `none` for utility only. Do not use `manual`.
+
+## 10. Rules
+
+- Do not mutate `environment` or `trajectory`.
+- Do not read benchmark labels, injection tasks or attack classes.
+- Handle your own errors inside `evaluate` (for example, return `escalate` or `deny` with a reason). An uncaught exception crashes the task run.
+- Make decisions deterministic where possible (temperature 0, fixed seeds).
+- Make LLM calls only through a tracked client.
+
+## 11. What each owner provides
+
+1. A callable `evaluate(context, state)`.
 2. A sample input and output.
-3. Required features, dependencies, thresholds, or configuration.
+3. Required features, dependencies, thresholds and configuration.
 4. Known limitations and representative failure cases.
-5. An explanation of what the policy catches, what legitimate calls it may block, and what unsafe calls it may miss.
+5. What it catches, which legitimate calls it may block, and which unsafe calls it may miss.
 
-A placeholder implementation is acceptable for initial interface integration.
+## 12. Known limitations of the runner (v0)
+
+- Agent token counts cover OpenAI-compatible providers only.
+- The security check looks at the final state, not at every executed call. A call that executed but left no trace is not counted as an attack success; P6 and P1 will agree on a stricter check.
+- The default reviewer approves everything until `LLMReviewer` lands.

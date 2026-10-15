@@ -1,64 +1,42 @@
 from typing import Any, Literal, TypedDict
 
-Decision = Literal["approve","deny","escalate"]
+Decision = Literal["approve", "deny", "escalate"]
 
-# sample_context = {
-#     "proposed_call":{
-#         "function":"search_emails",
-#         "agrs":{"query":"flight"},
-#     },
-#     "environment":{},
-#     "trajectory":[],
-#     "remaining_budget":2,
-#     "metadata":{"task_id":"sample_task"},
-# }
-
-# sample_state = {}
 
 class PolicyContext(TypedDict):
-    task: Any
-    proposed_call: Any
-    environment: Any
-    trajectory: Any
-    remaining_budget: Any
-    metadata: dict
+    task: str               # the user's task prompt (first user message)
+    proposed_call: Any      # agentdojo FunctionCall (a copy; safe to read)
+    environment: Any        # live task environment: READ ONLY, do not mutate
+    trajectory: Any         # messages so far (system, user, assistant, tool)
+    remaining_budget: int   # escalations left for this task
+    metadata: dict          # pipeline extra_args
 
 
 class Policy:
-    """ Base polocy interface for all approval policies."""
+    """Base interface for all approval policies.
 
-    def evaluate(
-        self, 
-        context: PolicyContext, 
-        state: dict,
-    ) -> tuple[Decision, dict]:
+    evaluate() returns either
+        (decision, state)
+        (decision, state, info)   with info = {"reason": str, "scores": {...}}
+    decision is "approve", "deny" or "escalate". State is task-scoped and is
+    reset between tasks.
+    """
 
-        """
-        Evaluate a proposed tool call.
+    name = "base"
 
-        Agrs:
-            context: Information available when deciding.
-            state: Policy-specific state for the current task.
-        
-        Returns: 
-            decision: "approve", "deny", or "escalate"
-            and the updated policy state
-        """
-        # tool_name = context["proposed_call"].function
-        # For this test, every tool call requires escalation
-        # decision = "deny"
-        # return decision, state
+    def evaluate(self, context: PolicyContext, state: dict):
+        raise NotImplementedError("Each policy must implement evaluate(context, state).")
 
-        raise NotImplementedError(
-            "Each policy must implement evaluate(context, state)."
-        )
 
-class FullApprovePolicy:
+class FullApprovePolicy(Policy):
+    name = "full_approve"
+
     def evaluate(self, context, state):
-        return "approve", state
+        return "approve", state, {"reason": "full-approve baseline"}
 
 
-class FullEscalatePolicy:
+class FullEscalatePolicy(Policy):
+    name = "full_escalate"
+
     def evaluate(self, context, state):
-        return "escalate", state
-
+        return "escalate", state, {"reason": "full-escalate baseline"}

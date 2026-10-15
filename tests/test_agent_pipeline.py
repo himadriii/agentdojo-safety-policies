@@ -192,9 +192,9 @@ def test_full_escalate():
         num_tool_calls=3,
     )
 
-    assert executions == 2, f"Expected 1 execution, got {executions}"
-    assert reviewer_calls == 2, f"Expected 1 reviewer call, got {reviewer_calls}"
-    assert budget.used == 2, f"Expected 1 escalation used, got {budget.used}"
+    assert executions == 2, f"Expected 2 execution, got {executions}"
+    assert reviewer_calls == 2, f"Expected 2 reviewer call, got {reviewer_calls}"
+    assert budget.used == 2, f"Expected 2 escalation used, got {budget.used}"
     assert budget.remaining == 0, f"Expected 0 remaining budget, got {budget.remaining}"
 
     print("PASS: FullEscalatePolicy")
@@ -204,7 +204,7 @@ def test_full_escalate():
 
 
 if __name__ == "__main__":
-    # test_full_approve()
+    test_full_approve()
     print()
     test_full_escalate()
 
