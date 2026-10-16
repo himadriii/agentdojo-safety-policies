@@ -47,6 +47,11 @@ python -m agent_framework.runner --provider groq --policy full_approve \
     --k 0 --outdir results/smoke
 ```
 
+To run P4's deterministic plan-consistency baseline, replace `full_approve`
+with `plan_consistency`. The policy uses the user task, proposed tool call,
+and prior assistant tool calls; it does not depend on the selected agent model.
+P4 implementation notes and limitations: [`docs/plan_consistency.md`](docs/plan_consistency.md).
+
 The last line prints `TCR` and `HITL`. A single task is noisy, so use it only to check that your setup works. The model is a placeholder and may change; do not make policies depend on it.
 
 ## Adding a policy
@@ -76,6 +81,8 @@ results/             run outputs (git-ignored)
 ```
 
 ## Notes
-- Rate limits on Groq's free tier cause `429` retries; use small task subsets.
+- Groq rate limits can still return `429`; the adapter retries up to 3 times by
+  default. Set `GROQ_MAX_RETRIES` to a non-negative integer to change the cap.
+  Retries reduce transient failures but do not prevent provider rate limits.
 - Results are cached per pipeline name under `--outdir`; use `--force` to rerun.
 - Interface changes go through P1.
