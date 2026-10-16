@@ -9,6 +9,18 @@ from agentdojo.models import MODEL_NAMES
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
 
+def _groq_max_retries():
+    """Bound provider retries; rate limiting is handled without long retry storms."""
+    raw = os.getenv("GROQ_MAX_RETRIES", "3")
+    try:
+        retries = int(raw)
+    except ValueError as exc:
+        raise ValueError("GROQ_MAX_RETRIES must be a non-negative integer") from exc
+    if retries < 0:
+        raise ValueError("GROQ_MAX_RETRIES must be a non-negative integer")
+    return retries
+
+
 def _flatten(content):
     """['text part', ...] -> 'text'. None -> ''."""
     if content is None:
@@ -42,7 +54,7 @@ def make_groq_llm(model: str) -> OpenAILLM:
     key = os.getenv("GROQ_API_KEY")
     if not key:
         raise RuntimeError("GROQ_API_KEY is not set (put it in .env in the repo root).")
-    client = openai.OpenAI(api_key=key, base_url=GROQ_BASE_URL, max_retries=8)
+    client = openai.OpenAI(api_key=key, base_url=GROQ_BASE_URL, max_retries=_groq_max_retries())
     _make_groq_compatible(client)
     # Attacks look the model up by name inside pipeline.name (which has "/" replaced by "_").
     MODEL_NAMES.setdefault(model, "AI assistant")
