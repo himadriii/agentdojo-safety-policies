@@ -120,6 +120,32 @@ def test_auto_deny_blocks_execution_and_returns_feedback():
     assert outcomes(executor) == ["auto_deny", "auto_deny"]
 
 
+def test_denial_log_contains_full_reason_and_validation_error(caplog):
+    validation_error = {
+        "edge_index": 0,
+        "edge": {"relation": "authorizes", "confidence": "very high"},
+        "error_type": "ValueError",
+        "error": "LLM confidence is not numeric",
+    }
+    pipeline, _ = build(
+        Fixed(
+            "deny",
+            {
+                "reason": "invalid provenance evidence",
+                "validation_errors": [validation_error],
+            },
+        ),
+        queries=("a",),
+    )
+
+    run(pipeline)
+
+    assert "decision=deny outcome=auto_deny" in caplog.text
+    assert "reason=invalid provenance evidence" in caplog.text
+    assert '"confidence": "very high"' in caplog.text
+    assert "LLM confidence is not numeric" in caplog.text
+
+
 def test_budget_exhaustion_denies_without_calling_reviewer():
     reviewer = MockReviewer()
     pipeline, executor = build(FullEscalatePolicy(), k=1, reviewer=reviewer)
