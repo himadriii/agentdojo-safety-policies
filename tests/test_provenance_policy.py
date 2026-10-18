@@ -85,6 +85,16 @@ def test_policy_approves_complete_direct_evidence():
     assert decision == "approve"
     assert state == {}
     assert info["scores"] == {"provenance_confidence": 1.0}
+    assert info["evidence"]["decision_rule"] == {
+        "decision": "approve",
+        "reason": "complete authorization and provenance",
+        "confidence": 1.0,
+    }
+    assert info["evidence"]["authorization_edges"][0]["source_role"] == "user"
+    argument = info["evidence"]["argument_provenance"][0]
+    assert argument["path"] == "/query"
+    assert argument["value"] == "invoice 42"
+    assert argument["provenance_edges"][0]["supporting_span"] == "invoice 42"
 
 
 def test_policy_escalates_missing_authorization():

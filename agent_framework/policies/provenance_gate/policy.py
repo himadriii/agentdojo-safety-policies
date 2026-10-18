@@ -21,6 +21,7 @@ class ProvenancePolicy(Policy):
         self.client = None
 
     def evaluate(self, context: PolicyContext, state: dict):
+        evidence = None
         try:
             evidence = extract_direct(context)
             if self.llm_enricher:
@@ -29,24 +30,85 @@ class ProvenancePolicy(Policy):
                 self.client = self.client or make_groq_client()
                 evidence = enrich_with_llm(evidence, self.client)
         except Exception as error:
+            info = {
+                "reason": (
+                    "provenance extraction failed "
+                    f"({type(error).__name__}: {error})"
+                )
+            }
+            if evidence is not None:
+                info["evidence"] = build_evidence_log(evidence)
             return (
                 "escalate",
                 state,
-                {
-                    "reason": (
-                        "provenance extraction failed "
-                        f"({type(error).__name__}: {error})"
-                    )
-                },
+                info,
             )
 
         decision, reason, confidence = decide(evidence)
-        info = {"reason": reason}
+        evidence_log = build_evidence_log(evidence)
+        evidence_log["decision_rule"] = {
+            "decision": decision,
+            "reason": reason,
+            "confidence": confidence,
+        }
+        info = {"reason": reason, "evidence": evidence_log}
         if evidence.get("edge_validation_errors"):
             info["validation_errors"] = evidence["edge_validation_errors"]
         if confidence is not None:
             info["scores"] = {"provenance_confidence": confidence}
         return decision, state, info
+
+
+def build_evidence_log(evidence: dict) -> dict:
+    """Build a factual audit record of the evidence used by the gate."""
+
+    sources = {source["id"]: source for source in evidence.get("sources", [])}
+
+    def with_source(edge):
+        source = sources.get(edge.get("source_id"), {})
+        return {
+            **edge,
+            "source_role": source.get("role"),
+            "source_content": source.get("content"),
+        }
+
+    edges = evidence.get("edges", [])
+    return {
+        "tool_name": evidence.get("tool_name"),
+        "arguments": evidence.get("arguments", {}),
+        "authorization_edges": [
+            with_source(edge)
+            for edge in edges
+            if edge.get("relation") == "authorizes"
+        ],
+        "argument_provenance": [
+            {
+                "path": path,
+                "value": value,
+                "provenance_edges": [
+                    with_source(edge)
+                    for edge in edges
+                    if edge.get("argument_path") == path
+                    and edge.get("relation") in {"provides_value", "derived_from"}
+                ],
+            }
+            for path, value in sorted(
+                flatten_arguments(evidence.get("arguments", {})).items()
+            )
+        ],
+        "adverse_edges": [
+            with_source(edge)
+            for edge in edges
+            if edge.get("relation") in {"conflicts_with", "untrusted_influence"}
+        ],
+        "all_validated_edges": [with_source(edge) for edge in edges],
+        "validation_errors": evidence.get("edge_validation_errors", []),
+        "thresholds": {
+            "minimum_authorization_confidence": 0.8,
+            "minimum_argument_confidence": 0.8,
+            "automatic_adverse_denial_confidence": 0.9,
+        },
+    }
 
 
 def decide(evidence: dict) -> tuple[str, str, float | None]:

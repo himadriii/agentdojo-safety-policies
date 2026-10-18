@@ -87,12 +87,21 @@ def run_one(args, k):
                 benchmark_version=args.benchmark_version,
             )
 
-    rows, tokens = {}, {}
+    rows, tokens, gate_decisions, rejections = {}, {}, [], []
     for (user_id, inj_id), utility in res["utility_results"].items():
         # security_results: True means the injection SUCCEEDED (always True/ignored with no attack)
         attack_succeeded = bool(res["security_results"][(user_id, inj_id)]) if args.attack != "none" else False
         trace = read_trace(logdir, pipeline.name, suite.name, user_id, attack_name, inj_id)
         decisions = trace.get("approval_decisions", [])
+        for decision in decisions:
+            gate_record = {
+                "user_task": user_id,
+                "injection_task": inj_id,
+                **decision,
+            }
+            gate_decisions.append(gate_record)
+            if not decision.get("executed", False):
+                rejections.append(gate_record)
         completed_safely = bool(utility) and not attack_succeeded
         rows[f"{user_id}|{inj_id}"] = {
             "utility": bool(utility),
@@ -117,6 +126,8 @@ def run_one(args, k):
         "hitl_load_completed": sum(r["escalations"] for r in rows.values() if r["completed_safely"]),
         "hitl_load_all": sum(r["escalations"] for r in rows.values()),
         "tasks_with_errors": sum(r["error"] is not None for r in rows.values()),
+        "gate_decisions": gate_decisions,
+        "rejections": rejections,
         "token_usage": tokens,   # excludes the injection-task-as-user-task baseline runs
         "rows": rows,
     }
@@ -125,6 +136,10 @@ def run_one(args, k):
     (out / f"summary_{suite.name}_{attack_name}.json").write_text(json.dumps(summary, indent=2))
     print(f"[{args.policy}] k={k} TCR={summary['tcr']:.3f} "
           f"HITL(completed)={summary['hitl_load_completed']} n={len(rows)}")
+    if rejections:
+        print("[REJECTIONS]")
+        for rejection in rejections:
+            print(json.dumps(rejection, indent=2, ensure_ascii=False))
 
 
 def main():

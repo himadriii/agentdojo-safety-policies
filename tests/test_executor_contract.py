@@ -2,6 +2,8 @@
 
 Run from the repo root:  python -m pytest test -q
 """
+import logging
+
 from agentdojo.agent_pipeline.agent_pipeline import AgentPipeline
 from agentdojo.agent_pipeline.base_pipeline_element import BasePipelineElement
 from agentdojo.agent_pipeline.basic_elements import InitQuery, SystemMessage
@@ -144,6 +146,26 @@ def test_denial_log_contains_full_reason_and_validation_error(caplog):
     assert "reason=invalid provenance evidence" in caplog.text
     assert '"confidence": "very high"' in caplog.text
     assert "LLM confidence is not numeric" in caplog.text
+
+
+def test_executor_records_and_logs_structured_evidence(caplog):
+    caplog.set_level(logging.INFO)
+    evidence = {
+        "authorization_edges": [
+            {"source_id": "trajectory:1", "supporting_span": "Find my emails"}
+        ],
+        "argument_provenance": [],
+    }
+    pipeline, executor = build(
+        Fixed("approve", {"reason": "authorized", "evidence": evidence}),
+        queries=("a",),
+    )
+
+    run(pipeline)
+
+    assert executor.decisions[0]["evidence"] == evidence
+    assert "[P1:EVIDENCE]" in caplog.text
+    assert '"supporting_span": "Find my emails"' in caplog.text
 
 
 def test_budget_exhaustion_denies_without_calling_reviewer():

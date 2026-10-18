@@ -1,3 +1,4 @@
+import json
 import logging
 from ast import literal_eval
 from collections.abc import Sequence
@@ -113,12 +114,37 @@ class P1ToolsExecutor(ToolsExecutor):
                 "budget_remaining": self.budget.remaining,
                 "reason": info.get("reason"),
                 "scores": info.get("scores"),
+                "validation_errors": info.get("validation_errors"),
+                "evidence": info.get("evidence"),
             })
             trace_logger = Logger.get()
             if hasattr(trace_logger, "set_contextarg"):  # NullLogger has no such method
                 trace_logger.set_contextarg("approval_decisions", self.decisions)
 
-            log.info("[P1] %s: %s (%s)", "APPROVED" if approved else "DENIED", tool_name, outcome)
+            log_method = log.info if approved else log.warning
+            log_method(
+                "[P1] %s tool=%s args=%s decision=%s outcome=%s "
+                "budget_remaining=%s reason=%s%s",
+                "APPROVED" if approved else "DENIED",
+                tool_name,
+                json.dumps(tool_call.args, ensure_ascii=False),
+                decision,
+                outcome,
+                self.budget.remaining,
+                info.get("reason") or "<no reason provided>",
+                (
+                    " validation_errors="
+                    + json.dumps(info["validation_errors"], ensure_ascii=False)
+                    if info.get("validation_errors")
+                    else ""
+                ),
+            )
+            if info.get("evidence") is not None:
+                log.info(
+                    "[P1:EVIDENCE] tool=%s %s",
+                    tool_name,
+                    json.dumps(info["evidence"], ensure_ascii=False),
+                )
 
             if approved:
                 result, error = runtime.run_function(env, tool_name, tool_call.args)
