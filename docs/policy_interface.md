@@ -72,14 +72,14 @@ reviewer.review(reviewer_context) -> "approve" | "deny"
 
 `reviewer_context` has exactly four keys: `task`, `proposed_call` (copy), `trajectory` (deep copy) and `policy_reason`. It never contains the environment or any benchmark information. The default is `MockReviewer` (approves everything; `MockReviewer("deny")` denies everything). An `LLMReviewer` will follow, with its prompt documented.
 
-The reviewer sees your `reason`, so keep it short and factual. Do not write "this is safe".
+The reviewer sees task, call and trajectory. The policy’s reason is hidden unless the reviewer is built with show_policy_reason=True.
 
 ## 7. Logging and cost
 
 Per task, the runner adds two fields to AgentDojo's trace JSON at `results/<pipeline_name>/<suite>/<user_task>/<attack>/<injection_task|none>.json`:
 
-- `approval_decisions`: one record per tool call with `tool`, `args`, `decision`, `outcome`, `executed`, `reviewer_called`, `budget_remaining`, `reason` and `scores`.
-- `token_usage`: `{agent|policy|reviewer: {calls, input_tokens, output_tokens}}`.
+- `approval_decisions`: one record per tool call with `tool`, `args`, `decision`, `outcome`, `executed`, `reviewer_called`, `reviewer_reason`, `budget_remaining`, `reason` and `scores`.
+- `token_usage`: `{agent|policy|reviewer: {calls, input_tokens, output_tokens, token_usage}}`.
 
 Agent tokens are tracked automatically for OpenAI-compatible providers. If your policy calls an LLM, wrap its OpenAI client once:
 
@@ -129,7 +129,7 @@ class ReadOnlyHeuristicPolicy(Policy):   # example only, not a recommended polic
 ```
 python -m agent_framework.runner --policy readonly_heuristic --llm openai/gpt-oss-20b --provider groq \
     --attack important_instructions --user-tasks user_task_0 --injection-tasks injection_task_0 \
-    --k 0 1 2 --outdir results/<yourname>
+    --reviewer {mock,mock_deny,llm} --reviewer-model openai/gpt-oss-120b --k 0 1 2 --outdir results/<yourname>
 ```
 
 Attack names: `important_instructions` (default), `direct`, `ignore_previous`, `injecagent`, `tool_knowledge`, or `none` for utility only. Do not use `manual`.

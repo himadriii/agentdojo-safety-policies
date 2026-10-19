@@ -42,6 +42,7 @@ class P1ToolsExecutor(ToolsExecutor):
         self.budget = budget if budget is not None else EscalationBudget(limit=2)
         self.policy_state = {}
         self.decisions = []
+        self._reviewer_reason = None
 
     def reset_for_new_task(self):
         """Reset task-scoped state: escalation budget, policy state, logs, token counts."""
@@ -110,6 +111,7 @@ class P1ToolsExecutor(ToolsExecutor):
                 "outcome": outcome,
                 "executed": approved,
                 "reviewer_called": reviewer_called,
+                "reviewer_reason": self._reviewer_reason if reviewer_called else None,
                 "budget_remaining": self.budget.remaining,
                 "reason": info.get("reason"),
                 "scores": info.get("scores"),
@@ -132,6 +134,7 @@ class P1ToolsExecutor(ToolsExecutor):
 
     def _resolve(self, decision, context, info):
         """Returns (outcome, approved, reviewer_called)."""
+        self._reviewer_reason = None
         if decision == "approve":
             return "auto_approve", True, False
         if decision == "deny":
@@ -143,6 +146,7 @@ class P1ToolsExecutor(ToolsExecutor):
                 context["task"], context["proposed_call"], context["trajectory"], info.get("reason")
             )
             approved = self.reviewer.review(reviewer_context) == "approve"
+            self._reviewer_reason = getattr(self.reviewer, "last_reason", None)
             return ("escalate_approved" if approved else "escalate_denied"), approved, True
         log.warning("[P1] Unknown policy decision %r; denying call.", decision)
         return "unknown_decision_deny", False, False

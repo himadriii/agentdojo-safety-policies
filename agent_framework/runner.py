@@ -26,9 +26,9 @@ from agent_framework.usage import track_openai_client
 
 from agent_framework.llm_providers import make_groq_llm
 from agent_framework.registry import POLICIES, REVIEWERS
+from agent_framework.llm_reviewer import REVIEWER_PROMPT_VERSION
 
-
-def build_pipeline(llm_name, policy_name, reviewer_name, k, provider="openai"):
+def build_pipeline(llm_name, policy_name, reviewer_name, k, provider="openai", reviewer_model=None):
     if provider == "groq":
         llm = make_groq_llm(llm_name)
     else:
@@ -37,6 +37,16 @@ def build_pipeline(llm_name, policy_name, reviewer_name, k, provider="openai"):
         track_openai_client(llm.client, "agent")
     else:
         logging.warning("Agent token usage is only tracked for OpenAI-compatible providers.")
+
+    if reviewer_name == "llm":
+        reviewer_model = reviewer_model or llm_name
+        reviewer = REVIEWERS["llm"](model=reviewer_model)
+        rname = f"llm{REVIEWER_PROMPT_VERSION}-{reviewer_model}"
+    else:
+        reviewer = REVIEWERS[reviewer_name]()
+        rname = reviewer_name
+    executor = P1ToolsExecutor(policy=POLICIES[policy_name](), reviewer=reviewer,
+                               budget=EscalationBudget(limit=k))
 
     executor = P1ToolsExecutor(
         policy=POLICIES[policy_name](),
@@ -51,7 +61,7 @@ def build_pipeline(llm_name, policy_name, reviewer_name, k, provider="openai"):
         ToolsExecutionLoop([executor, llm]),
     ])
     # Unique per config (results are cached per pipeline name); "/" breaks AgentDojo's cache lookup.
-    pipeline.name = f"{llm_name}-{policy_name}-{reviewer_name}-k{k}".replace("/", "_")
+    pipeline.name = f"{llm_name}-{policy_name}-{rname}-k{k}".replace("/", "_")
     return pipeline
 
 
@@ -65,7 +75,7 @@ def read_trace(logdir, pipeline_name, suite_name, user_task, attack_name, inject
 
 def run_one(args, k):
     logdir = Path(args.outdir)
-    pipeline = build_pipeline(args.llm, args.policy, args.reviewer, k, args.provider)
+    pipeline = build_pipeline(args.llm, args.policy, args.reviewer, k, args.provider, args.reviewer_model)
     suite = get_suite(args.benchmark_version, args.suite)
     user_tasks = args.user_tasks or None
 
@@ -111,7 +121,7 @@ def run_one(args, k):
 
     n = max(len(rows), 1)
     summary = {
-        "policy": args.policy, "reviewer": args.reviewer, "llm": args.llm, "k": k,
+        "policy": args.policy, "reviewer": args.reviewer, "llm": args.llm, "k": k, "reviewer_model": args.reviewer_model,
         "suite": suite.name, "attack": attack_name, "n": len(rows),
         "tcr": sum(r["completed_safely"] for r in rows.values()) / n,
         "hitl_load_completed": sum(r["escalations"] for r in rows.values() if r["completed_safely"]),
@@ -135,6 +145,7 @@ def main():
     p.add_argument("--reviewer", default="mock", choices=sorted(REVIEWERS))
     p.add_argument("--llm", required=True)#, choices=[m.value for m in ModelsEnum])
     p.add_argument("--provider", default="openai", choices=["openai", "groq"])
+    p.add_argument("--reviewer-model", default=None)
     p.add_argument("--suite", default="workspace")
     p.add_argument("--benchmark-version", default="v1.2")
     p.add_argument("--attack", default="important_instructions")  # or "none"
