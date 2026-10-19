@@ -50,6 +50,9 @@ suite_grid() {  # suite
       stage "$1" full_escalate "$k" "$attack"
     done
   done
+  for attack in important_instructions none; do
+    stage "$1" similarity_reuse 2 "$attack"   # comparison: similarity reuse without key arguments
+  done
 }
 
 log "stage 0: smoke test on $MODEL"
