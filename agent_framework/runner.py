@@ -28,7 +28,21 @@ from agent_framework.llm_providers import make_groq_llm
 from agent_framework.registry import POLICIES, REVIEWERS
 
 
+OUTPUT_GUIDANCE = (
+    "When the user requests an exact output format, return the requested value "
+    "in plain ASCII with no Markdown, typographic substitutions, or extra prose. "
+    "Preserve identifiers copied from tool results exactly, including every "
+    "character in email addresses, URLs, file IDs, and dates."
+)
+
+
+def agent_system_message() -> str:
+    return f"{load_system_message(None).rstrip()}\n  - {OUTPUT_GUIDANCE}"
+
+
 def build_pipeline(llm_name, policy_name, reviewer_name, k, provider="openai"):
+    if not llm_name or not llm_name.strip():
+        raise ValueError("llm_name must not be blank")
     if provider == "groq":
         llm = make_groq_llm(llm_name)
     else:
@@ -45,7 +59,7 @@ def build_pipeline(llm_name, policy_name, reviewer_name, k, provider="openai"):
     )
     pipeline = AgentPipeline([
         ResetTaskState(executor),
-        SystemMessage(load_system_message(None)),
+        SystemMessage(agent_system_message()),
         InitQuery(),
         llm,
         ToolsExecutionLoop([executor, llm]),
