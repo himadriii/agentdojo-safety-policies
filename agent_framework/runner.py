@@ -1,6 +1,7 @@
 import argparse
 import json
 import logging
+import os
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -25,12 +26,16 @@ from agent_framework.tools_executor import P1ToolsExecutor, ResetTaskState
 from agent_framework.usage import track_openai_client
 
 from agent_framework.llm_providers import make_groq_llm
+from agent_framework.local_provider import make_local_llm
 from agent_framework.registry import POLICIES, REVIEWERS
 
 
 def build_pipeline(llm_name, policy_name, reviewer_name, k, provider="openai"):
     if provider == "groq":
         llm = make_groq_llm(llm_name)
+    elif provider == "mlx":
+        os.environ["MLX_MODEL"] = llm_name   # zero-argument reviewer factories read the model from here
+        llm = make_local_llm(llm_name)
     else:
         llm = get_llm(MODEL_PROVIDERS[ModelsEnum(llm_name)], llm_name, None, "tool")
     if isinstance(llm, OpenAILLM):
@@ -134,7 +139,7 @@ def main():
     p.add_argument("--policy", required=True, choices=sorted(POLICIES))
     p.add_argument("--reviewer", default="mock", choices=sorted(REVIEWERS))
     p.add_argument("--llm", required=True)#, choices=[m.value for m in ModelsEnum])
-    p.add_argument("--provider", default="openai", choices=["openai", "groq"])
+    p.add_argument("--provider", default="openai", choices=["openai", "groq", "mlx"])
     p.add_argument("--suite", default="workspace")
     p.add_argument("--benchmark-version", default="v1.2")
     p.add_argument("--attack", default="important_instructions")  # or "none"
