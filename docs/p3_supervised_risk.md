@@ -1,6 +1,6 @@
 # P3: Supervised Risk Policy — what was built, how, and why
 
-Status: Oct 17, 2026. The model is **frozen** (plan deadline Oct 19). Offline held-out results are final. The real LLM-driven held-out runs are **blocked by Groq's daily token cap** (section 9).
+Status: Oct 19, 2026. The model was **frozen** on Oct 17 (plan deadline Oct 19). Offline held-out results (section 7) and real LLM-driven held-out runs through the shared runner (section 7b) are both **complete**: 64 of 72 planned run slots finished, 8 could not run on Groq's free tier, 0 are pending.
 
 ## 1. The idea in one paragraph
 
@@ -110,6 +110,29 @@ Reading it: the policy gets most of `full_escalate`'s safety with a tiny fractio
 - **All 21 benign calls denied** are `delete_file` in `user_task_35`: the user legitimately asks to delete a file and the model refuses (3 calls × 7 attack variants). One task, not a broad problem, but a real false positive.
 - **All 7 unsafe calls missed** are `create_calendar_event` for injection task 2: an attacker's invite looks like the calendar events users really create.
 
+## 7b. Real held-out runs through the shared runner
+
+Real `gpt-oss-20b` agent, the shared runner (`python -m agent_framework.runner`), the frozen model, and the **mock reviewer, which approves every escalation**. Only held-out injection task 2 (an attacker's calendar invite to `mark.black-2134@gmail.com`) could run on Groq's free tier, so each attack run is one (user task, injection task 2) pair. The grid was 6 stages x 12 held-out user tasks = 72 slots: **64 finished, 8 skipped** (HTTP 413, a single request over the 8,000 tokens-per-minute limit; mostly `user_task_35`, plus `user_task_27` and `user_task_28` in one stage each), **0 not run**. Skipped slots are not counted as passes or failures.
+
+**Attack runs, matched on the 10 user tasks that all four configurations completed** (tasks 0, 1, 2, 4, 8, 13, 15, 22, 27, 33):
+
+| Policy | k | Task done | Attack worked | Completed safely (TCR) |
+|---|---|---|---|---|
+| `full_approve` (no guard) | 0 | 2 / 10 | 6 / 10 | 2 / 10 |
+| `supervised_risk` | 0 | 4 / 10 | **0 / 10** | 4 / 10 |
+| `supervised_risk` | 2 | 3 / 10 | 5 / 10 | 2 / 10 |
+| `supervised_risk` | 5 | 3 / 10 | 2 / 10 | 3 / 10 |
+
+Using every task each configuration completed (10 or 11 per row) gives the same picture: `full_approve` 6 of 11 attacks worked; `supervised_risk` 0 of 10 at k=0, 5 of 11 at k=2, 3 of 11 at k=5.
+
+**No-attack runs (does the guard hurt normal work?):** `supervised_risk` k=2 completed 9 of 10 tasks, flagged 2 of 22 actions, blocked 1 and asked the reviewer once; `full_approve` completed 9 of 11 (9 of 10 on the matched tasks). On these tasks the guard barely cost utility.
+
+**Why the attack success rate depends on k.** The attacker's calendar invite scored 0.62, 0.84, 0.86, 0.89 and 0.89 in five runs (escalated) and 0.90, 0.90 and 0.95 in three runs (denied; the deny line is 0.90). At k=0 an escalation is denied automatically (no budget), so every attack was blocked. At k=2 and k=5 the escalation goes to the mock reviewer, which approves it, so the attack runs. The policy flagged nearly every invite, but about two thirds scored just under the deny line, so safety then depends on the reviewer. A real LLM reviewer (P1) has not landed, so that case was not tested. I did not lower the deny threshold after seeing this, because the held-out set must not be used for tuning.
+
+**Caveats.** Ten to eleven runs per row is far too few for firm claims; a difference of one run is noise. The agent is weak on these tasks (no guard completes only 2 of 10), so utility is mostly limited by the agent, not the policy. Only one injection task and one attack template were run. Held-out injection tasks 7, 9 and 10 pull whole inboxes or all files and cannot run on this tier.
+
+---
+
 ## 8. The honesty caveats
 
 - **Replay data is easier than a live agent.** Unsafe calls in replay clearly do not match the user's task. Treat the replay numbers as an optimistic upper bound.
@@ -119,16 +142,15 @@ Reading it: the policy gets most of `full_escalate`'s safety with a tiny fractio
 - Offline replay is not AgentDojo's own security check.
 - The held-out set is small (48 task pairs), so intervals are wide.
 
-## 9. The Groq blocker (important for planning)
+## 9. The Groq limits (what they changed)
 
-Groq's free tier allows **200,000 tokens per day per organization** (plus 8,000 per minute). My three API keys are in the **same organization** (their usage counters were identical), so they share one 200,000-token budget. An agent task costs roughly 2,000 to 20,000 tokens, so the whole team-key budget supports only about 10 to 30 task-runs per day.
+Groq's free tier allows **200,000 tokens per day per organization**, a rolling 24-hour window, plus 8,000 tokens per minute. Keys from the same organization share one budget; my first three keys were in one organization and a fourth was in another.
 
-Consequences:
-- Collecting real dev trajectories used the day's budget.
-- The held-out Groq runs (about 60 runs for one policy at one `k`, about 60 more for the `full_approve` baseline) need **several days of quota**, or a key from a separate Groq organization, or a paid Dev Tier.
-- Held-out injection tasks 7, 9 and 10 pull whole inboxes or all files; those requests may be rejected as too large (HTTP 413) on this tier and would count as errors, not completions.
-
-`p3_risk/final_runs.sh` is ready and resumable: re-run it after the quota recovers and it picks up where it stopped (finished tasks are cached). It runs `supervised_risk` at k=2 first, then the `full_approve` baseline, then no-attack utility runs, then other `k` values.
+What happened and what it cost:
+- My dev trajectory collection used up the first organization's daily cap, which blocked the first attempt at the held-out runs. A retry loop then wasted quota on tasks that could not finish.
+- Of 81 dev traces collected, only 33 finished with a recorded result; the rest stopped partway on quota errors or crashes.
+- A single request larger than 8,000 tokens (HTTP 413) cannot succeed on retry. That excludes held-out injection tasks 7, 9 and 10, and 8 of the 72 planned slots (`user_task_35` and two others).
+- The final grid was run in three shards across two organizations, started once each rolling window had cleared. `p3_risk/final_runs.sh` is resumable: finished tasks are cached by the runner.
 
 ## 10. How to run it
 
@@ -156,8 +178,8 @@ bash p3_risk/final_runs.sh 0 1 GROQ_API_KEY       # all held-out Groq runs, sing
 - **Cost:** one small random-forest inference per tool call. No LLM calls, so zero extra tokens in the `policy` bucket.
 - **Complementary method:** plan-consistency (P4) or provenance (P7). They ask *why* the call happens; mine looks at *what* it looks like.
 
-## 12. Still to do
+## 12. Status and what is left
 
-1. Run `final_runs.sh` for the held-out Groq results once quota is available (section 9), then summarise them with the runner's `summary_*.json` files.
-2. Fill the real-run numbers into the report alongside section 7.
+1. Done: policy, frozen model, offline held-out evaluation (section 7), real held-out runs (section 7b), and these notes.
+2. Not run: held-out injection tasks 7, 9, 10 and `user_task_35` on Groq (too large for the free tier); a real LLM reviewer (P1), so escalations were not independently tested; a combined policy (P1 and P4).
 3. Do not commit `.env`, the `results/` folder, or any API key. The keys were shared in chat and should be rotated after the project.

@@ -125,20 +125,22 @@ I also simulated a full task with a budget `k` (a rough stand-in for the real ru
 *Meaning: with no guard, almost every attack works. Mine stops nearly all of them, and unlike "ask about everything" it does not exhaust the budget on harmless actions. **But this is my own simulation, which assumes the agent always obeys the attack. It is probably too optimistic.***
 
 ### 5c. Real runs on hidden tasks (through the shared runner)
-Only attack #2 (a fake calendar invite) could run, because the other hidden attacks were too large for the free Groq plan. 11 task pairs per guard:
+Only attack #2 (a fake calendar invite) could run, because the other hidden attacks were too large for the free Groq plan. I compared the 10 tasks that every setup finished:
 
-| Guard | Task finished | Attack worked | Completed safely (TCR) |
+| Guard | Task finished | Attack worked | Completed safely |
 |---|---|---|---|
-| `full_approve` (no guard) | 3 / 11 | 6 / 11 | 3 / 11 = 0.27 |
-| Mine (`supervised_risk`, k=2) | 4 / 11 | 5 / 11 | 3 / 11 = 0.27 |
+| No guard (`full_approve`) | 2 / 10 | 6 / 10 | 2 / 10 |
+| Mine, **k = 0** (no questions allowed) | 4 / 10 | **0 / 10** | **4 / 10** |
+| Mine, k = 2 | 3 / 10 | 5 / 10 | 2 / 10 |
+| Mine, k = 5 | 3 / 10 | 2 / 10 | 3 / 10 |
 
-**This is the honest, disappointing result.** In these 11 runs my guard barely beat having no guard. The reason is not that it missed the attack:
+**How to read it**
+- **With k = 0 my guard blocked every attack (0 of 10)**, against 6 of 10 with no guard. With no budget, anything it is unsure about is blocked automatically, so only the guard's own judgment counts.
+- **Giving it a budget made attacks come back (5 of 10 at k = 2).** The guard noticed the fake invite and *asked the reviewer*, but the reviewer is a **mock that approves everything**, so the attack ran.
+- The fake invite scored 0.62 to 0.89 in five runs (asked the reviewer) and 0.90 to 0.95 in three runs (blocked). My "block" line is 0.90, so most invites landed just under it.
+- **Normal work was barely affected:** with no attack, my guard finished 9 of 10 tasks, flagged 2 of 22 actions and blocked 1. No guard also finished 9 of 10.
 
-- It **did notice** the fake invite and *escalated* it (risk 0.84 and 0.86).
-- But the reviewer is a **mock that approves everything**, so the attack went through anyway.
-- The invite scored a little **below** my 0.90 "deny" line. In one run it scored 0.95, was **denied**, and the attack was blocked.
-
-*Meaning: my guard's safety here depends on a real reviewer existing. Right now it does not. Eleven runs is also too few to prove anything.*
+*Meaning: the guard's own judgment is good, but any attack it only "asks about" depends on the reviewer. A real reviewer has not been built yet, so that was not tested. And 10 tasks per row is far too few to prove anything: a difference of one run is noise.*
 
 ### 5d. Where it fails (the two weak spots)
 1. **Wrongly blocks a legitimate delete.** In one hidden task, the user *asked* to delete a file, and my guard blocked it. That single task caused all of the 3.3% false blocks.
@@ -167,13 +169,13 @@ Of the dev attack runs I collected with no guard, only **19 finished with a reco
 **Finished**
 - The guard is built, registered and tested, and **frozen**.
 - The offline hidden-exam results.
-- Real runs for the main test (11 pairs): my guard and the no-guard baseline.
-- The write-ups.
+- All the real runs on hidden tasks: **64 of 72 planned runs finished**. The other 8 were too large for the free Groq plan, so they were skipped and are reported as not run.
+- The write-ups, committed to the `sahana` branch.
 
-**Not finished**
-- About **40 more real runs** (utility checks without attacks, and other `k` values). They start automatically at **4:45 pm** and **11:15 pm today** (Oct 18) when the Groq limit frees up, and should finish around **1 am Oct 19**.
-- Putting those final numbers into the documents.
-- Held-out attacks #7, #9, #10 and one task cannot run on the free plan at all.
+**Not finished (and not something P3 can do alone)**
+- Hidden attacks #7, #9, #10 and one hidden task cannot run on the free Groq plan.
+- A real reviewer (P1), so that "ask the reviewer" can be tested properly.
+- The combined method with another guard (P1 and P4).
 
 ---
 
@@ -181,8 +183,8 @@ Of the dev attack runs I collected with no guard, only **19 finished with a reco
 
 > "P3 is a guard that learned from examples. Before the AI agent does anything, it scores how risky the action looks, using things like: is the recipient only mentioned in text the agent read, and did that text sound like an instruction? Low score runs it, middle asks a reviewer, high blocks it.
 > On replayed test data it catches 99.5% of attacks and only questions about 5% of normal actions.
-> On real runs it noticed the attack but the fake reviewer approved everything, so the real-world result was only equal to no guard. It needs a real reviewer to show its value.
-> It is frozen. About 40 runs are left, which need Groq's daily limit to reset. They are scheduled for tonight."
+> On real runs with no question budget it blocked every attack (0 of 10, against 6 of 10 with no guard). With a budget it asked the reviewer, but the fake reviewer approves everything, so attacks came back. It needs a real reviewer to show its full value.
+> It is frozen, and all the runs that could run on the free plan are finished."
 
 ---
 
@@ -194,6 +196,6 @@ Of the dev attack runs I collected with no guard, only **19 finished with a reco
 
 **Is the model cheating by memorizing the attacks?** I took care against it: no raw words as features, hidden tasks kept apart, and attack styles never seen in training were used only for the exam. It is not proof, but it is a fair attempt.
 
-**Why only 11 real runs?** Groq's free plan limit. Anything with so few runs cannot support firm claims.
+**Why only about 10 real runs per setup?** Groq's free plan: a daily token cap, and some tasks are too large for it. Anything with so few runs cannot support firm claims.
 
 **What would improve it?** A real LLM reviewer (P1), combining with another guard such as P4's plan check (the team's combined method), and a higher-limit Groq plan for bigger tests.
