@@ -75,6 +75,21 @@ def test_reused_id_does_not_match_an_older_result():
     assert outcomes(executor) == ["escalate_denied", "escalate_approved", "auto_approve"]
 
 
+class DenyQueryA(Reviewer):
+    def review(self, context):
+        return "deny" if context["proposed_call"].args.get("query") == "a" else "approve"
+
+
+def test_denial_memory_is_checked_before_approval_memory():
+    """KTD5: a read approval covers every later search, but an exact repeat of a denied one stays denied."""
+    steps = [[call("search_emails", "c1", query="a")],
+             [call("search_emails", "c2", query="b")],
+             [call("search_emails", "c3", query="a")]]
+    pipeline, executor = build(steps, k=3, reviewer=DenyQueryA())
+    run(pipeline)
+    assert outcomes(executor) == ["escalate_denied", "escalate_approved", "auto_deny"]
+
+
 def test_tool_runtime_error_still_counts_as_reviewer_approval():
     pipeline, executor = build([[call("flaky_tool", "c1", x="1")], [call("flaky_tool", "c2", x="1")]], k=1)
     run(pipeline)
@@ -110,6 +125,43 @@ def test_base_exception_escalates_instead_of_crashing():
     run(pipeline)
     assert executor.decisions[0]["decision"] == "escalate"
     assert "RuntimeError" in executor.decisions[0]["reason"]
+
+
+class CountingBase(Policy):
+    """Two-tuple base that escalates only its second call."""
+
+    def __init__(self):
+        self.seen = []
+
+    def evaluate(self, context, state):
+        state = {**state, "n": state.get("n", 0) + 1}
+        self.seen.append(state["n"])
+        return ("escalate" if state["n"] == 2 else "approve"), state
+
+
+def test_base_state_is_threaded_and_kept_apart_from_reuse_memory():
+    base = CountingBase()
+    steps = [[call("search_emails", "c1", query="a")],
+             [call("search_emails", "c2", query="b")],
+             [call("search_emails", "c3", query="c")]]
+    pipeline, executor = build(steps, policy=ApprovalReusePolicy(base=base), k=2)
+    run(pipeline)
+    assert base.seen == [1, 2, 3]
+    assert executor.policy_state["base"] == {"n": 3}
+    # the base's own approval of c1 is not a reviewer approval, so c2 is still escalated (R3)
+    assert outcomes(executor) == ["auto_approve", "escalate_approved", "auto_approve"]
+
+
+def test_reuse_error_keeps_the_escalation():
+    def broken(*args):
+        raise ZeroDivisionError
+
+    pipeline, executor = build([[call("search_emails", "c1", query="a")],
+                                [call("search_emails", "c2", query="b")]],
+                               policy=ApprovalReusePolicy(covers=broken), k=2)
+    run(pipeline)
+    assert outcomes(executor) == ["escalate_approved", "escalate_approved"]
+    assert "reuse skipped (ZeroDivisionError)" in executor.decisions[1]["reason"]
 
 
 def test_reason_names_the_earlier_call_and_scores_are_floats():

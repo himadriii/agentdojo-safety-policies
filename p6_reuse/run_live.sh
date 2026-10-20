@@ -11,6 +11,7 @@ cd "$(dirname "$0")/.."
 
 MODEL="${MODEL:?set MODEL to the served model id, e.g. gpt-oss-20b-MXFP4-Q8}"
 N="${1:-4}"
+case "$N" in ''|*[!0-9]*|0) echo "user-tasks-per-suite must be a positive integer, got '$N'"; exit 2 ;; esac
 PY="${PYTHON:-.venv/bin/python}"
 OUT="${OUTDIR:-results/p6_live}"
 export MLX_BASE_URL="${MLX_BASE_URL:-http://127.0.0.1:11234/v1}"
@@ -23,10 +24,24 @@ split() {  # suite field [limit]
 print(' '.join(s[:int(sys.argv[3])] if len(sys.argv) > 3 else s))" "$@"
 }
 
+FAILED=0
+
+fail() {  # message
+  log "FAILED $*"
+  FAILED=$((FAILED + 1))
+}
+
 stage() {  # suite policy k attack
-  local suite=$1 policy=$2 k=$3 attack=$4 users extra=()
-  users=$(split "$suite" user_tasks "$N")
-  [ "$attack" != none ] && extra=(--injection-tasks $(split "$suite" injection_tasks))
+  local suite=$1 policy=$2 k=$3 attack=$4 users injections extra=()
+  # An empty task list makes the runner run every task in the suite, so refuse it.
+  users=$(split "$suite" user_tasks "$N") && [ -n "$users" ] \
+    || { fail "$suite $policy k=$k $attack (no user tasks from p6_reuse/data/split.json)"; return; }
+  if [ "$attack" != none ]; then
+    injections=$(split "$suite" injection_tasks) && [ -n "$injections" ] \
+      || { fail "$suite $policy k=$k $attack (no injection tasks from p6_reuse/data/split.json)"; return; }
+    # shellcheck disable=SC2206
+    extra=(--injection-tasks $injections)
+  fi
   log "START $suite $policy k=$k $attack"
   # shellcheck disable=SC2086
   # ${extra[@]+...}: an empty array under `set -u` aborts on macOS's bash 3.2
@@ -35,7 +50,7 @@ stage() {  # suite policy k attack
       --k "$k" --outdir "$OUT" >> "$OUT/log.txt" 2>&1; then
     log "DONE  $suite $policy k=$k $attack"
   else
-    log "FAILED $suite $policy k=$k $attack (see $OUT/log.txt)"
+    fail "$suite $policy k=$k $attack (see $OUT/log.txt)"
   fi
 }
 
@@ -63,4 +78,8 @@ SMOKE_OUTDIR="$OUT/smoke" bash p6_reuse/smoke.sh "$MODEL" 2 >> "$OUT/log.txt" 2>
 for suite in slack travel workspace; do
   suite_grid "$suite"
 done
+if [ "$FAILED" -gt 0 ]; then
+  log "GRID FINISHED WITH $FAILED FAILED STAGE(S); rerun to resume them"
+  exit 1
+fi
 log "ALL STAGES DONE"

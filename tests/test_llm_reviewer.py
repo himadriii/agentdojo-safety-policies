@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 from agentdojo.functions_runtime import FunctionCall
+from agentdojo.logging import Logger
 from agentdojo.types import text_content_block_from_string
 
 from agent_framework.llm_reviewer import LocalLLMReviewer
@@ -60,6 +61,28 @@ def test_unparseable_and_failed_replies_are_counted():
     r, _ = reviewer(raises=RuntimeError("server down"))
     assert r.review(context()) == "deny"
     assert r.unparseable == 1
+
+
+class RecordingTrace(Logger):
+    """Stands in for AgentDojo's TraceLogger: holds trace context without writing files."""
+
+    def __init__(self):
+        self.context = {}
+
+    def set_contextarg(self, key, value):
+        self.context[key] = value
+
+
+def test_unparseable_and_failed_replies_reach_the_task_trace():
+    """smoke.sh and p6_reuse.summarize read this trace key, not the instance counter."""
+    with RecordingTrace() as trace:
+        r, _ = reviewer("maybe")
+        r.review(context())
+        r.review(context())
+        r, _ = reviewer(raises=RuntimeError("server down"))
+        r.review(context())
+        reviewer("APPROVE")[0].review(context())
+    assert trace.context["reviewer_unparseable"] == 3
 
 
 def test_missing_model_refuses_to_build(monkeypatch):

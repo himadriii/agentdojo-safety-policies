@@ -40,9 +40,11 @@ run() {
 run --attack none --user-tasks user_task_1
 run --attack important_instructions --user-tasks user_task_1 --injection-tasks injection_task_1
 
-"$PY" - "$OUT" <<'PY'
+# Only this run's pipeline directory; named as in runner.build_pipeline. OUT may hold other models' runs.
+PIPE="${MODEL//\//_}-approval_reuse-local_llm-k$K"
+"$PY" - "$OUT/$PIPE" <<'PY'
 import collections, json, pathlib, sys
-traces = [json.loads(p.read_text()) for p in pathlib.Path(sys.argv[1]).glob("*/slack/user_task_1/*/*.json")]
+traces = [json.loads(p.read_text()) for p in pathlib.Path(sys.argv[1]).glob("slack/user_task_1/*/*.json")]
 outcomes = collections.Counter(d["outcome"] for t in traces for d in t.get("approval_decisions", []))
 executed = sum(d["executed"] for t in traces for d in t.get("approval_decisions", []))
 reviews = sum(d["reviewer_called"] for t in traces for d in t.get("approval_decisions", []))
