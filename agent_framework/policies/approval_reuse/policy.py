@@ -92,14 +92,16 @@ class ApprovalReusePolicy(Policy):
 
     @staticmethod
     def _find_result(record, trajectory, used):
-        """Index of the tool result for an escalated call, searching only messages after it was escalated."""
+        """Index of the tool result for an escalated call, searching only messages after it was escalated.
+
+        The call itself must match too: ids repeat within one assistant message on some local servers
+        ("call_0", ""), so an id alone could pin another call's denial or approval on this record.
+        """
         for i in range(record["index"], len(trajectory)):
             message = trajectory[i]
             if i in used or message["role"] != "tool":
                 continue
-            if record["id"] is not None:
-                if message.get("tool_call_id") == record["id"]:
-                    return i
+            if record["id"] is not None and message.get("tool_call_id") != record["id"]:
                 continue
             tool_call = message.get("tool_call")
             if tool_call is not None and tool_call.function == record["function"] and dict(tool_call.args) == record["args"]:
