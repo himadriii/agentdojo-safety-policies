@@ -21,6 +21,7 @@ from p2_anomaly.diagnostics import clustered_flag_interval
 
 ROOT = Path(__file__).resolve().parents[1]
 CODE_PATHS = [
+    'agent_framework/inference.py', 'agent_framework/runner_config.py',
     'agent_framework/policies/anomaly.py', 'agent_framework/policies/anomaly_features.py',
     'agent_framework/policies/anomaly_support.py', 'agent_framework/llm_reviewer.py',
     'agent_framework/llm_providers.py', 'agent_framework/runner.py',
