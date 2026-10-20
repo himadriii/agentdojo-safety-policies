@@ -2,6 +2,8 @@ import argparse
 import json
 import logging
 from pathlib import Path
+import re, sys, time
+import openai
 
 from dotenv import load_dotenv
 
@@ -72,6 +74,19 @@ def read_trace(logdir, pipeline_name, suite_name, user_task, attack_name, inject
     except FileNotFoundError:
         return {}
 
+def run_with_resume(fn, max_wait_s=900, max_tries=6):
+    """Re-run fn() after a rate-limit error. Cached tasks are skipped, so this resumes where it stopped."""
+    for attempt in range(max_tries):
+        try:
+            return fn()
+        except openai.RateLimitError as e:
+            m = re.search(r"try again in (?:(\d+)h)?(?:(\d+)m)?(?:([\d.]+)s)?", str(e))
+            wait = (int(m.group(1) or 0) * 3600 + int(m.group(2) or 0) * 60 + float(m.group(3) or 0)) if m else None
+            if wait is None or wait > max_wait_s or attempt == max_tries - 1:
+                sys.exit(f"Rate limit not recoverable by waiting ({wait}s). Rerun later; finished tasks are cached.\n{e}")
+            print(f"[runner] rate limit; sleeping {wait + 5:.0f}s then resuming")
+            time.sleep(wait + 5)
+
 
 def run_one(args, k):
     logdir = Path(args.outdir)
@@ -79,23 +94,27 @@ def run_one(args, k):
     suite = get_suite(args.benchmark_version, args.suite)
     user_tasks = args.user_tasks or None
 
-    with OutputLogger(str(logdir)):
-        if args.attack == "none":
-            attack_name = "none"
-            # loops over tasks and calls suite.run_task_with_pipeline, which calls pipeline.query once per task.
-            res = benchmark_suite_without_injections(
+    # Load the attack once, outside the retry loop.
+    if args.attack == "none":
+        attack, attack_name = None, "none"
+    else:
+        attack = load_attack(args.attack, suite, pipeline)
+        attack_name = attack.name
+
+    def _bench():
+        if attack is None:
+            return benchmark_suite_without_injections(
                 pipeline, suite, logdir=logdir, force_rerun=args.force,
                 user_tasks=user_tasks, benchmark_version=args.benchmark_version,
             )
-        else:
-            attack = load_attack(args.attack, suite, pipeline)
-            attack_name = attack.name
-            # loops over tasks and calls suite.run_task_with_pipeline, which calls pipeline.query once per task.
-            res = benchmark_suite_with_injections(
-                pipeline, suite, attack, logdir=logdir, force_rerun=args.force,
-                user_tasks=user_tasks, injection_tasks=args.injection_tasks or None,
-                benchmark_version=args.benchmark_version,
-            )
+        return benchmark_suite_with_injections(
+            pipeline, suite, attack, logdir=logdir, force_rerun=args.force,
+            user_tasks=user_tasks, injection_tasks=args.injection_tasks or None,
+            benchmark_version=args.benchmark_version,
+        )
+
+    with OutputLogger(str(logdir)):
+        res = run_with_resume(_bench)
 
     rows, tokens = {}, {}
     for (user_id, inj_id), utility in res["utility_results"].items():

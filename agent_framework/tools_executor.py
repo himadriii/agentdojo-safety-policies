@@ -1,4 +1,6 @@
 import logging
+import copy
+import time
 from ast import literal_eval
 from collections.abc import Sequence
 
@@ -92,16 +94,25 @@ class P1ToolsExecutor(ToolsExecutor):
 
             context = {
                 "task": task_text,
-                "proposed_call": tool_call.model_copy(deep=True),  # policies can't mutate the real call
-                "environment": env,
-                "trajectory": messages,
+                "proposed_call": tool_call.model_copy(deep=True),
+                "environment": env,                              # read-only by contract
+                "trajectory": copy.deepcopy(list(messages)),     # a policy can't corrupt the agent's conversation
                 "remaining_budget": self.budget.remaining,
-                "metadata": extra_args,
+                "metadata": {"step": len(self.decisions),        # fresh dict per call
+                             "decision_history": copy.deepcopy(self.decisions)},
             }
 
-            decision, self.policy_state, info = self._unpack(
-                self.policy.evaluate(context, self.policy_state)
-            )
+            policy_error = None
+            t0 = time.perf_counter()
+            try:
+                decision, self.policy_state, info = self._unpack(
+                    self.policy.evaluate(context, self.policy_state))
+            except Exception as exc:       # one buggy policy must not kill a whole benchmark run
+                log.exception("[P1] policy raised; falling back to escalate")
+                decision, info = "escalate", {"reason": "POLICY_ERROR", "scores": {}}
+                policy_error = f"{type(exc).__name__}: {exc}"[:300]
+            latency = time.perf_counter() - t0
+
             outcome, approved, reviewer_called = self._resolve(decision, context, info)
 
             self.decisions.append({
@@ -115,7 +126,10 @@ class P1ToolsExecutor(ToolsExecutor):
                 "budget_remaining": self.budget.remaining,
                 "reason": info.get("reason"),
                 "scores": info.get("scores"),
+                "policy_error": policy_error,
+                "policy_latency_s": round(latency, 4),
             })
+
             trace_logger = Logger.get()
             if hasattr(trace_logger, "set_contextarg"):  # NullLogger has no such method
                 trace_logger.set_contextarg("approval_decisions", self.decisions)

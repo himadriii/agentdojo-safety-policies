@@ -183,3 +183,24 @@ def test_unknown_decision_is_denied():
     run(pipeline)
     assert EXECUTED == []
     assert outcomes(executor) == ["unknown_decision_deny"]
+
+def test_policy_exception_falls_back_to_escalate_and_is_logged():
+    class Boom(Policy):
+        def evaluate(self, context, state):
+            raise ValueError("bug")
+
+    pipeline, executor = build(Boom(), k=2, queries=("a",))
+    run(pipeline)
+    assert outcomes(executor) == ["escalate_approved"]       # mock reviewer approves
+    assert executor.decisions[0]["policy_error"].startswith("ValueError")
+
+def test_policy_cannot_corrupt_agent_conversation():
+    class Wipe(Policy):
+        def evaluate(self, context, state):
+            context["trajectory"].clear()
+            return "approve", state
+
+    pipeline, _ = build(Wipe(), queries=("a", "b"))
+    messages = run(pipeline)
+    assert EXECUTED == ["a", "b"]
+    assert messages[0]["role"] == "system" and len(messages) >= 5

@@ -32,7 +32,7 @@ The policy recommends; the runner enforces.
 | `trajectory` | list of AgentDojo messages | System, user, assistant and tool messages so far. The assistant message that requested the call is the last item. |
 | `environment` | AgentDojo `TaskEnvironment` | The live environment. **Read-only. Do not mutate.** |
 | `remaining_budget` | `int` | Escalations left for this task, before this call. |
-| `metadata` | `dict` | Pipeline `extra_args`. Currently empty; do not rely on it. |
+| `metadata` | `dict` | `{"step": int, "decision_history": [...]}`|
 
 Messages are dicts with `role`, `content` (a list of `{"type": "text", "content": str}` blocks), plus `tool_calls` (assistant) or `tool_call` and `error` (tool). To get text:
 
@@ -141,6 +141,7 @@ Attack names: `important_instructions` (default), `direct`, `ignore_previous`, `
 - Handle your own errors inside `evaluate` (for example, return `escalate` or `deny` with a reason). An uncaught exception crashes the task run.
 - Make decisions deterministic where possible (temperature 0, fixed seeds).
 - Make LLM calls only through a tracked client.
+- An exception inside evaluate is caught, logged as policy_error, and treated as escalate.
 
 ## 11. What each owner provides
 
