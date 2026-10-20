@@ -11,6 +11,11 @@ from p2_anomaly.experiments import (
 )
 
 
+@pytest.fixture(autouse=True)
+def declared_test_route(monkeypatch):
+    monkeypatch.setenv('REVIEWER_PROVIDER', 'groq')
+
+
 def test_collection_is_only_development_and_real_reviewer():
     plan = make_plan('collect', repeats=3)
     validate_plan(plan)
@@ -126,6 +131,7 @@ def test_run_refuses_missing_credentials_before_network(tmp_path, monkeypatch):
     import p2_anomaly.experiments as experiments
     monkeypatch.setattr(experiments, 'load_dotenv', lambda *_: None)
     monkeypatch.delenv('GROQ_API_KEY', raising=False)
+    save(tmp_path / 'absent.json', make_plan('collect', 1))
     with pytest.raises(ValueError, match='GROQ_API_KEY missing'):
         experiments.run_plan(tmp_path / 'absent.json', 1)
 

@@ -14,7 +14,7 @@ from p2_anomaly.splits import CALIBRATE
 DEFAULT_CANDIDATE = ROOT / 'p2_anomaly/artifacts/development/family-v3-category'
 
 
-def prepare(directory, candidate=DEFAULT_CANDIDATE):
+def prepare(directory, candidate=DEFAULT_CANDIDATE, provider='groq'):
     directory, candidate = Path(directory).resolve(), Path(candidate).resolve()
     if directory.exists():
         raise ValueError('Choose a new output directory; existing experiments must not be overwritten')
@@ -24,13 +24,13 @@ def prepare(directory, candidate=DEFAULT_CANDIDATE):
         if version(package) != expected[package]:
             raise ValueError(f'{package} version mismatch; install the P2 environment-lock.txt')
     verified = reproduce(candidate)
-    development = make_plan('development')
+    development = make_plan('development', provider=provider)
     development['jobs'] = [j for j in development['jobs'] if j['k'] == 2]
     order = {'anomaly': 0, 'full_approve': 1, 'full_escalate': 2}
     development['jobs'].sort(key=lambda j: (j['user_task'], j['attack'], order[j['policy']]))
     development['note'] = ('Development evidence only, not held-out results. Gate-first matched '
                            'triplets with real reviewer and k=2; do not tune on final tasks.')
-    collection = make_plan('collect', repeats=1)
+    collection = make_plan('collect', repeats=1, provider=provider)
     collection['jobs'] = [j for j in collection['jobs']
                           if j['user_task'] in {f'user_task_{i}' for i in CALIBRATE}]
     for name, plan in [('development', development), ('calibration', collection)]:
@@ -93,6 +93,7 @@ def main():
     sub = parser.add_subparsers(dest='command', required=True)
     prepare_parser = sub.add_parser('prepare')
     prepare_parser.add_argument('--out', type=Path, required=True)
+    prepare_parser.add_argument('--provider', choices=['groq', 'lmstudio'], default='groq')
     prepare_parser.add_argument('--candidate', type=Path, default=DEFAULT_CANDIDATE)
     run_parser = sub.add_parser('run')
     run_parser.add_argument('--directory', type=Path, required=True)
@@ -104,7 +105,7 @@ def main():
     bundle_parser.add_argument('--out', type=Path, required=True)
     args = parser.parse_args()
     if args.command == 'prepare':
-        result = prepare(args.out, args.candidate)
+        result = prepare(args.out, args.candidate, args.provider)
     elif args.command == 'run':
         load_dotenv(ROOT / '.env')
         result = run(args.directory, args.phase, args.max_jobs, args.resume_after_quota)

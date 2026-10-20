@@ -7,6 +7,11 @@ import pytest
 from p2_anomaly.handoff import prepare, bundle, run
 
 
+@pytest.fixture(autouse=True)
+def declared_test_route(monkeypatch):
+    monkeypatch.setenv('REVIEWER_PROVIDER', 'groq')
+
+
 def test_preparation_is_portable_gate_first_and_keeps_test_tasks_out(tmp_path):
     destination = tmp_path / 'handoff'
     result = prepare(destination)
@@ -60,7 +65,9 @@ def test_quota_stop_applies_across_phases(tmp_path):
         run(destination, 'calibration', 1)
 
 
-def test_course_final_is_preassigned_matched_and_held_out(tmp_path):
+def test_course_final_is_preassigned_matched_and_held_out(tmp_path, monkeypatch):
+    import p2_anomaly.experiments as experiments
+    monkeypatch.setattr(experiments, "TEAM_FINAL_SPLIT_CONFIRMED", True)
     from collections import Counter
     from p2_anomaly.experiments import make_plan, validate_plan, save
     from p2_anomaly.splits import TEST
@@ -82,5 +89,42 @@ def test_course_final_is_preassigned_matched_and_held_out(tmp_path):
 def test_handoff_cannot_silently_change_reviewer_provider(tmp_path, monkeypatch):
     from p2_anomaly.experiments import run_plan
     monkeypatch.setenv('REVIEWER_PROVIDER', 'lmstudio')
+    from p2_anomaly.experiments import save, make_plan
+    save(tmp_path / 'unused-plan.json', make_plan('collect', 1))
     with pytest.raises(ValueError, match='pins the reviewer'):
         run_plan(tmp_path / 'unused-plan.json', 1)
+
+
+def test_lmstudio_plans_are_separate_and_development_only(tmp_path):
+    prepare(tmp_path / 'local', provider='lmstudio')
+    for phase in ('development', 'calibration'):
+        plan = json.loads((tmp_path / 'local' / phase / 'plan.json').read_text())
+        assert plan['provider'] == 'lmstudio'
+        assert plan['reviewer_model'] == 'openai/gpt-oss-20b'
+        assert plan['stage'] != 'final'
+
+
+def test_final_is_blocked_pending_team_split(tmp_path):
+    from p2_anomaly.experiments import make_plan, save
+    save(tmp_path / 'freeze.json', {'files': {}, 'source': {}})
+    with pytest.raises(ValueError, match='provisional'):
+        make_plan('final', frozen=tmp_path, profile='course')
+
+
+def test_local_p2_agent_does_not_retry_provider_failure(monkeypatch):
+    from types import SimpleNamespace
+    from agentdojo.functions_runtime import FunctionsRuntime
+    import agent_framework.inference as inference
+    calls = []
+    def fail(**kwargs):
+        calls.append(kwargs)
+        raise RuntimeError('provider stopped')
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=fail)))
+    monkeypatch.setattr(inference, 'make_inference_client', lambda _: client)
+    monkeypatch.setenv('P2_STOP_ON_PROVIDER_ERROR', '1')
+    monkeypatch.setenv('LMSTUDIO_MAX_TOKENS', '4096')
+    llm = inference.make_inference_llm('lmstudio', 'test-model')
+    with pytest.raises(RuntimeError, match='provider stopped'):
+        llm.query('test', FunctionsRuntime([]))
+    assert len(calls) == 1
+    assert calls[0]['max_completion_tokens'] == 4096

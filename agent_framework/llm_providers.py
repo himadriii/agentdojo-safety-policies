@@ -31,6 +31,9 @@ class NoRetryGroqLLM(OpenAILLM):
     Used for quota-bounded experiments. A provider error ends the current batch.
     """
 
+    output_limit_env = 'GROQ_MAX_OUTPUT_TOKENS'
+    default_output_limit = '2048'
+
     def query(self, query, runtime, env=EmptyEnv(), messages=(), extra_args=None):
         from agentdojo.agent_pipeline.llms.openai_llm import (
             _message_to_openai, _function_to_openai, _openai_to_assistant_message,
@@ -41,7 +44,7 @@ class NoRetryGroqLLM(OpenAILLM):
             # Match the pinned AgentDojo OpenAILLM exactly: a zero value is
             # omitted by its `temperature or NOT_GIVEN` conversion.
             'temperature': self.temperature or openai.NOT_GIVEN,
-            'max_completion_tokens': int(os.getenv('GROQ_MAX_OUTPUT_TOKENS', '2048')),
+            'max_completion_tokens': int(os.getenv(self.output_limit_env, self.default_output_limit)),
         }
         tools = [_function_to_openai(f) for f in runtime.functions.values()]
         if tools:

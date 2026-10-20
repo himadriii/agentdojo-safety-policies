@@ -20,6 +20,7 @@ from p2_anomaly.train import FIT, CALIBRATE, TEST
 from p2_anomaly.diagnostics import clustered_flag_interval
 
 ROOT = Path(__file__).resolve().parents[1]
+TEAM_FINAL_SPLIT_CONFIRMED = False  # Await the combined-policy team's exposure audit.
 CODE_PATHS = [
     'agent_framework/inference.py', 'agent_framework/runner_config.py',
     'agent_framework/policies/anomaly.py', 'agent_framework/policies/anomaly_features.py',
@@ -102,10 +103,12 @@ def freeze_candidate(source, destination):
 def validate_plan(plan):
     if plan['stage'] not in ('collect', 'development', 'final'):
         raise ValueError('invalid experiment stage')
-    if plan['suite'] != 'workspace' or plan['benchmark_version'] != 'v1.2' or plan['provider'] != 'groq':
+    if plan['suite'] != 'workspace' or plan['benchmark_version'] != 'v1.2' or plan['provider'] not in ('groq', 'lmstudio'):
         raise ValueError('unexpected benchmark/provider configuration')
     if plan['stage'] == 'final' and not plan.get('frozen_directory'):
         raise ValueError('held-out evaluation requires frozen artifacts')
+    if plan['stage'] == 'final' and not TEAM_FINAL_SPLIT_CONFIRMED:
+        raise ValueError('Final split is provisional; team agreement is required before running final tasks')
     allowed = {f'user_task_{i}' for i in (TEST if plan['stage'] == 'final' else FIT + CALIBRATE)}
     injection_ids = {f'injection_task_{i}' for i in ([2, 7, 9, 10] if plan['stage'] == 'final' else [0, 1, 3, 4, 5, 6, 8, 11, 12, 13])}
     seen = set()
@@ -128,7 +131,7 @@ def validate_plan(plan):
             raise ValueError('injection task partition violation')
 
 
-def make_plan(stage, repeats=3, frozen=None, model='openai/gpt-oss-20b', profile='full'):
+def make_plan(stage, repeats=3, frozen=None, model='openai/gpt-oss-20b', profile='full', provider='groq'):
     if repeats < 1:
         raise ValueError('repeats must be positive')
     if profile not in ('full', 'course') or (profile == 'course' and stage != 'final'):
@@ -137,6 +140,8 @@ def make_plan(stage, repeats=3, frozen=None, model='openai/gpt-oss-20b', profile
         if not frozen:
             raise ValueError('final evaluation requires frozen artifacts')
         verify_freeze(frozen)
+        if not TEAM_FINAL_SPLIT_CONFIRMED:
+            raise ValueError('Final split is provisional after composite-task exposure; obtain team agreement before final evaluation')
     jobs = []
     # Interleave partitions so a free-tier quota stop does not leave calibration empty.
     collection_users = []
@@ -169,7 +174,7 @@ def make_plan(stage, repeats=3, frozen=None, model='openai/gpt-oss-20b', profile
                                      'k': k, 'user_task': f'user_task_{uid}',
                                      'injection_task': None if iid is None else f'injection_task_{iid}',
                                      'attack': attack, 'repetition': repetition})
-    return {'stage': stage, 'profile': profile, 'provider': 'groq', 'model': model, 'reviewer_model': model,
+    return {'stage': stage, 'profile': profile, 'provider': provider, 'model': model, 'reviewer_model': model,
             'benchmark_version': 'v1.2', 'suite': 'workspace', 'jobs': jobs,
             'frozen_directory': str(Path(frozen).resolve()) if frozen else None,
             'freeze_sha256': digest(Path(frozen) / 'freeze.json') if frozen else None,
@@ -183,17 +188,24 @@ def run_plan(plan_path, max_jobs, artifact=None, resume_after_quota=False):
     if max_jobs < 1:
         raise ValueError('max-jobs must be positive')
     load_dotenv(ROOT / '.env')
-    if os.getenv('REVIEWER_PROVIDER', 'groq') != 'groq':
-        raise ValueError('This P2 plan pins the reviewer to Groq; set REVIEWER_PROVIDER=groq for matched evaluation')
-    if not os.getenv('GROQ_API_KEY'):
+    plan_path = Path(plan_path).resolve()
+    plan = json.loads(plan_path.read_text())
+    validate_plan(plan)
+    provider = plan['provider']
+    if os.getenv('REVIEWER_PROVIDER', provider) != provider:
+        raise ValueError('This P2 plan pins the reviewer to its declared provider; set REVIEWER_PROVIDER accordingly')
+    if provider == 'groq' and not os.getenv('GROQ_API_KEY'):
         raise ValueError('GROQ_API_KEY missing: configure local .env; do not paste it into chat')
+    os.environ['REVIEWER_PROVIDER'] = provider
+    os.environ['P2_STOP_ON_PROVIDER_ERROR'] = '1'
     os.environ['GROQ_STOP_ON_QUOTA'] = '1'
     os.environ['GROQ_MAX_RETRIES'] = '0'
     os.environ['GROQ_REQUEST_INTERVAL_SECONDS'] = '20'
     os.environ['GROQ_TIMEOUT'] = '45'
-    plan_path = Path(plan_path).resolve()
-    plan = json.loads(plan_path.read_text())
-    validate_plan(plan)
+    os.environ['LMSTUDIO_MAX_RETRIES'] = '0'
+    os.environ['LMSTUDIO_TIMEOUT'] = '60'
+    if provider == 'lmstudio' and not os.getenv('LMSTUDIO_BASE_URL'):
+        raise ValueError('LMSTUDIO_BASE_URL is required for the declared LM Studio route')
     if plan.get('quota_resume_required') and not resume_after_quota:
         raise ValueError('quota stop retained from prior collection; resume explicitly after provider reset')
     if plan.get('frozen_directory'):
@@ -221,9 +233,10 @@ def run_plan(plan_path, max_jobs, artifact=None, resume_after_quota=False):
         'plan': plan_hash, 'model': digest(artifact) if artifact else None,
         'source': {name: digest(ROOT / name) for name in CODE_PATHS},
         'versions': {name: version(name) for name in ('agentdojo', 'scikit-learn', 'openai', 'numpy', 'joblib')},
-        'request_limits': {'retries': 0, 'interval_seconds': 20,
-                           'agent_temperature': 'pinned AgentDojo provider default',
-                           'max_output_tokens': int(os.getenv('GROQ_MAX_OUTPUT_TOKENS', '2048'))},
+        'endpoint': os.getenv('LMSTUDIO_BASE_URL') if provider == 'lmstudio' else 'https://api.groq.com/openai/v1',
+        'request_limits': {'retries': 0, 'interval_seconds': 20 if provider == 'groq' else 0,
+                           'agent_temperature': 'pinned AgentDojo provider default' if provider == 'groq' else 0,
+                           'max_output_tokens': int(os.getenv('GROQ_MAX_OUTPUT_TOKENS', '2048')) if provider == 'groq' else int(os.getenv('LMSTUDIO_MAX_TOKENS', '4096'))},
     }
     execution_hash = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
     if any(record.get('execution_sha256') != execution_hash for record in ledger.values()):
@@ -302,10 +315,14 @@ def audit_collection(plan_path, output, max_calls):
         raise ValueError('only no-attack development collection can be audited for training')
     from agentdojo.functions_runtime import FunctionCall
     from agentdojo.types import get_text_content_as_str
-    from agent_framework.llm_reviewer import LLMReviewer, REVIEWER_PROMPT_VERSION
+    from agent_framework.llm_reviewer import LLMReviewer, REVIEWER_PROMPT_VERSION, REVIEWER_SCHEMA
+    from agent_framework.inference import make_inference_client
     from agent_framework.reviewer import build_reviewer_context
     from agent_framework.usage import TRACKER
-    reviewer = LLMReviewer(model=plan['reviewer_model'])
+    os.environ['LMSTUDIO_MAX_RETRIES'] = '0'
+    os.environ['LMSTUDIO_TIMEOUT'] = '60'
+    reviewer = LLMReviewer(model=plan['reviewer_model'],
+                           client=make_inference_client(plan['provider'], response_schema=REVIEWER_SCHEMA))
     output = Path(output).resolve()
     entries = json.loads(output.read_text()) if output.exists() else []
     by_hash = {e['sha256']: e for e in entries}
@@ -441,6 +458,7 @@ def main():
     plan.add_argument('--out', type=Path, required=True)
     plan.add_argument('--repeats', type=int, default=3)
     plan.add_argument('--frozen', type=Path)
+    plan.add_argument('--provider', choices=['groq', 'lmstudio'], default='groq')
     plan.add_argument('--profile', choices=['full', 'course'], default='full')
     run = sub.add_parser('run')
     run.add_argument('--plan', type=Path, required=True)
@@ -460,7 +478,7 @@ def main():
     if args.command == 'plan':
         if args.out.exists():
             raise ValueError('plan already exists; use a new directory for a different manifest')
-        result = make_plan(args.stage, args.repeats, args.frozen, profile=args.profile)
+        result = make_plan(args.stage, args.repeats, args.frozen, profile=args.profile, provider=args.provider)
         save(args.out, result)
         print(f"Created {len(result['jobs'])} planned episodes; no API calls made")
     else:
