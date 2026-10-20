@@ -13,4 +13,5 @@ REVIEWERS = {
     "mock": MockReviewer,
     "mock_deny": partial(MockReviewer, "deny"),
     "llm": LLMReviewer,    
+    "local_llm": LLMReviewer,
 }
