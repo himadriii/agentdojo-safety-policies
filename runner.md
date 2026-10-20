@@ -1,7 +1,7 @@
-# Running main
+# Running p1-llm-reviewer
 
 This branch supports local LM Studio models and hosted inference through the same
-runner. Available policies: `full_approve`, `full_escalate`. Reviewers: `mock`.
+runner. Available policies: `full_approve`, `full_escalate`. Reviewers: `mock`, `mock_deny`, `llm`.
 
 ## Setup and configuration
 
@@ -40,7 +40,7 @@ With the `.env` above, run one task:
 
 ```bash
 .venv/bin/python -m agent_framework.runner \
-  --policy full_approve --attack none --user-tasks user_task_0 \
+  --policy full_escalate --attack none --user-tasks user_task_0 \
   --k 0 --outdir results/smoke-local --force
 ```
 
@@ -48,7 +48,7 @@ Run all workspace tasks:
 
 ```bash
 .venv/bin/python -m agent_framework.runner \
-  --policy full_approve --attack none \
+  --policy full_escalate --attack none \
   --k 0 --outdir results/full-updated --force
 ```
 
@@ -60,7 +60,7 @@ For an attacked task, use a separate output directory:
 
 ```bash
 .venv/bin/python -m agent_framework.runner \
-  --policy full_approve --attack important_instructions \
+  --policy full_escalate --attack important_instructions \
   --user-tasks user_task_0 --injection-tasks injection_task_0 \
   --k 0 2 --outdir results/attack-local --force
 ```
@@ -80,7 +80,7 @@ keeping both models and credentials in `.env`:
 
 ```bash
 .venv/bin/python -m agent_framework.runner \
-  --provider groq --policy full_approve --attack none \
+  --provider groq --policy full_escalate --attack none \
   --user-tasks user_task_0 --k 0 --outdir results/smoke-groq --force
 ```
 
@@ -120,3 +120,18 @@ IDs and model-setting changes still require a new output directory or `--force`.
 Never commit `.env`, credentials, or generated results. Historical experiment
 scripts may retain their original provider flags; these commands are the common
 entry point across branches.
+
+## LLM reviewer
+
+Use the existing `llm` reviewer with a nonzero budget:
+
+```bash
+.venv/bin/python -m agent_framework.runner \
+  --policy full_escalate --reviewer llm --attack none \
+  --user-tasks user_task_0 --k 2 --outdir results/reviewer-smoke --force
+```
+
+The reviewer uses the agent provider and model unless `REVIEWER_PROVIDER` or
+`REVIEWER_MODEL` is set in `.env`. `--reviewer-model` overrides the model for one
+run. A different provider uses that provider's model key when no reviewer model
+is set. Prompt and decision parsing retain this branch's existing behavior.
