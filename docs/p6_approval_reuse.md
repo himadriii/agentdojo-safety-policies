@@ -33,7 +33,7 @@ Each decision also logs `reuse_drilldown` (1.0 when the approval came from the d
 python -m pytest tests -q                        # all offline tests
 python -m p6_reuse.probes                        # probe set -> results/p6/probes/
 python -m p6_reuse.replay                        # offline replay -> results/p6/replay/
-python -m p6_reuse.summarize --outdir results/p6_live   # tables from live runs
+python -m p6_reuse.summarize --outdir results/p6_live_g2   # tables from live runs
 ```
 
 Live runs use a local MLX-Serve server (OpenAI-compatible) through `--provider mlx`, and the `local_llm` reviewer on the same model:
@@ -42,7 +42,8 @@ Live runs use a local MLX-Serve server (OpenAI-compatible) through `--provider m
 /Applications/MLX-Serve.app/Contents/MacOS/mlx-serve serve --host 127.0.0.1 --ctx-size 32768 \
     --model-dir ~/.mlx-serve/models --model-dir ~/.lmstudio/models
 bash p6_reuse/smoke.sh lmstudio-community/gemma-4-E4B-it-MLX-4bit          # smoke
-MODEL=mlx-community/gpt-oss-20b-MXFP4-Q8 bash p6_reuse/run_live.sh 4      # final grid, resumable
+MODEL=mlx-community/gpt-oss-20b-MXFP4-Q8 bash p6_reuse/run_live.sh        # final grid, resumable
+DRY_RUN=1 MODEL=x bash p6_reuse/run_live.sh                                # list the stages only
 ```
 
 `MLX_BASE_URL` (default `http://127.0.0.1:11234/v1`) and `MLX_MAX_TOKENS` (default 4096) configure the provider. The provider makes four fixes for MLX-Serve:

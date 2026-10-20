@@ -21,6 +21,8 @@ def _write_run(root, pipeline, policy, k, attack, rows, decisions, tokens=None):
 def test_summarize_builds_one_row_per_run_with_separate_attack_columns(tmp_path):
     reuse = [{"outcome": "escalate_approved", "reviewer_called": True, "scores": {"gate_ms": 1.0}},
              {"outcome": "auto_approve", "reviewer_called": False, "scores": {"reuse_approved": 1.0, "gate_ms": 3.0}},
+             {"outcome": "auto_approve", "reviewer_called": False,
+              "scores": {"reuse_approved": 1.0, "reuse_drilldown": 1.0, "gate_ms": 4.0}},
              {"outcome": "auto_deny", "reviewer_called": False, "scores": {"reuse_denied": 1.0, "gate_ms": 2.0}}]
     attacked = {"user_task_1|injection_task_1": {"utility": True, "attack_succeeded": False, "completed_safely": True}}
     clean = {"user_task_1|None": {"utility": True, "attack_succeeded": False, "completed_safely": True}}
@@ -30,8 +32,9 @@ def test_summarize_builds_one_row_per_run_with_separate_attack_columns(tmp_path)
     rows = summarize.collect(tmp_path)
     assert len(rows) == 2
     reuse_row = next(r for r in rows if r["policy"] == "approval_reuse")
-    assert reuse_row["reviews_saved_approval"] == 1 and reuse_row["reviews_saved_denial"] == 1
-    assert reuse_row["mean_gate_ms"] == 2.0
+    assert reuse_row["reviews_saved_approval"] == 2 and reuse_row["reviews_saved_drilldown"] == 1
+    assert reuse_row["reviews_saved_denial"] == 1
+    assert reuse_row["mean_gate_ms"] == 2.5
     assert reuse_row["live_attack_success"] == 0.0 and reuse_row["reviewer_unparseable"] == 1
     clean_row = next(r for r in rows if r["policy"] == "full_escalate")
     assert clean_row["live_attack_success"] is None

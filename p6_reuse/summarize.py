@@ -5,7 +5,10 @@ traces it points to, and writes one comparison table per suite (policy x k x att
 Live attack success comes from AgentDojo's final-state check and is never mixed with the
 replay attack success that p6_reuse.replay reports.
 
-Run: python -m p6_reuse.summarize [--outdir results/p6_live]
+`reviews_saved_approval` counts every call approved from memory; `reviews_saved_drilldown` is the part
+of it that came from the cross-tool drill-down rule.
+
+Run: python -m p6_reuse.summarize [--outdir results/p6_live_g2]
 """
 import argparse
 import json
@@ -15,7 +18,7 @@ from agent_framework.runner import read_trace
 from p6_reuse.metrics import reuse_counts, write_csv
 
 COLUMNS = ["suite", "policy", "k", "attack", "n", "tcr", "utility", "live_attack_success", "reviews",
-           "reviews_saved_approval", "reviews_saved_denial", "budget_exhausted_denials", "mean_gate_ms",
+           "reviews_saved_approval", "reviews_saved_drilldown", "reviews_saved_denial", "budget_exhausted_denials", "mean_gate_ms",
            "reviewer_unparseable", "policy_tokens", "tasks_with_errors"]
 
 
@@ -70,7 +73,7 @@ def to_markdown(rows) -> str:
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("--outdir", default="results/p6_live")
+    ap.add_argument("--outdir", default="results/p6_live_g2")
     args = ap.parse_args(argv)
     rows = collect(Path(args.outdir))
     if not rows:

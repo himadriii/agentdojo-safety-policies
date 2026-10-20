@@ -11,6 +11,8 @@ def reuse_counts(decisions) -> dict:
     return {
         "reviews_saved_approval": sum(d["outcome"] == "auto_approve" and score(d, "reuse_approved") == 1.0
                                       for d in decisions),
+        "reviews_saved_drilldown": sum(d["outcome"] == "auto_approve" and score(d, "reuse_drilldown") == 1.0
+                                       for d in decisions),
         "reviews_saved_denial": sum(d["outcome"] == "auto_deny" and score(d, "reuse_denied") == 1.0
                                     for d in decisions),
         "budget_exhausted_denials": sum(d["outcome"] == "budget_exhausted_deny" for d in decisions),
