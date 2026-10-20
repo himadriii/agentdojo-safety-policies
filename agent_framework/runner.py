@@ -1,13 +1,12 @@
 import argparse
+import hashlib
 import json
 import logging
 import os
 from pathlib import Path
 
-from dotenv import load_dotenv
-
 from agentdojo.logging import OutputLogger
-from agentdojo.agent_pipeline.agent_pipeline import AgentPipeline, get_llm, load_system_message
+from agentdojo.agent_pipeline.agent_pipeline import AgentPipeline, load_system_message
 from agentdojo.agent_pipeline.basic_elements import InitQuery, SystemMessage
 from agentdojo.agent_pipeline.llms.openai_llm import OpenAILLM
 from agentdojo.agent_pipeline.tool_execution import ToolsExecutionLoop
@@ -16,7 +15,6 @@ from agentdojo.benchmark import (
     benchmark_suite_with_injections,
     benchmark_suite_without_injections,
 )
-from agentdojo.models import MODEL_PROVIDERS, ModelsEnum
 from agentdojo.task_suite.load_suites import get_suite
 
 from agent_framework.budget import EscalationBudget
@@ -27,26 +25,42 @@ from agent_framework.usage import track_openai_client
 
 from agent_framework.llm_providers import make_groq_llm
 from agent_framework.local_provider import make_local_llm
+from agent_framework.inference import (
+    PROVIDERS, component_settings, make_inference_client, make_inference_llm,
+)
+from agent_framework.runner_config import load_runner_env, validate_inference_args
 from agent_framework.registry import POLICIES, REVIEWERS
 
 
-def build_pipeline(llm_name, policy_name, reviewer_name, k, provider="openai"):
+def build_pipeline(llm_name, policy_name, reviewer_name, k, provider="openai", reviewer_model=None):
+    if not llm_name or not llm_name.strip():
+        raise ValueError("llm_name must not be blank")
     if provider == "groq":
         llm = make_groq_llm(llm_name)
     elif provider == "mlx":
-        os.environ["MLX_MODEL"] = llm_name   # zero-argument reviewer factories read the model from here
+        os.environ["MLX_MODEL"] = llm_name  # Legacy P6 scripts also use this adapter.
         llm = make_local_llm(llm_name)
     else:
-        llm = get_llm(MODEL_PROVIDERS[ModelsEnum(llm_name)], llm_name, None, "tool")
+        llm = make_inference_llm(provider, llm_name)
     if isinstance(llm, OpenAILLM):
         track_openai_client(llm.client, "agent")
     else:
         logging.warning("Agent token usage is only tracked for OpenAI-compatible providers.")
 
+    inference_config = {"agent": {"provider": provider, "model": llm_name}}
+    policy = POLICIES[policy_name]()
+    if reviewer_name in ("llm", "local_llm"):
+        reviewer_provider, reviewer_model = component_settings(
+            "REVIEWER", provider, llm_name, reviewer_model
+        )
+        reviewer = REVIEWERS[reviewer_name](
+            model=reviewer_model, client=make_inference_client(reviewer_provider)
+        )
+        inference_config["reviewer"] = {"provider": reviewer_provider, "model": reviewer_model}
+    else:
+        reviewer = REVIEWERS[reviewer_name]()
     executor = P1ToolsExecutor(
-        policy=POLICIES[policy_name](),
-        reviewer=REVIEWERS[reviewer_name](),
-        budget=EscalationBudget(limit=k),
+        policy=policy, reviewer=reviewer, budget=EscalationBudget(limit=k),
     )
     pipeline = AgentPipeline([
         ResetTaskState(executor),
@@ -55,8 +69,13 @@ def build_pipeline(llm_name, policy_name, reviewer_name, k, provider="openai"):
         llm,
         ToolsExecutionLoop([executor, llm]),
     ])
-    # Unique per config (results are cached per pipeline name); "/" breaks AgentDojo's cache lookup.
-    pipeline.name = f"{llm_name}-{policy_name}-{reviewer_name}-k{k}".replace("/", "_")
+    # Separate local and hosted results, including policy/reviewer model overrides.
+    pipeline.inference_config = inference_config
+    config_key = hashlib.sha256(json.dumps(inference_config, sort_keys=True).encode()).hexdigest()[:10]
+    reviewer_tag = reviewer_name
+    pipeline.name = (
+        f"{provider}-{llm_name}-{policy_name}-{reviewer_tag}-k{k}-{config_key}"
+    ).replace("/", "_")
     return pipeline
 
 
@@ -70,7 +89,7 @@ def read_trace(logdir, pipeline_name, suite_name, user_task, attack_name, inject
 
 def run_one(args, k):
     logdir = Path(args.outdir)
-    pipeline = build_pipeline(args.llm, args.policy, args.reviewer, k, args.provider)
+    pipeline = build_pipeline(args.llm, args.policy, args.reviewer, k, args.provider, args.reviewer_model)
     suite = get_suite(args.benchmark_version, args.suite)
     user_tasks = args.user_tasks or None
 
@@ -116,6 +135,7 @@ def run_one(args, k):
 
     n = max(len(rows), 1)
     summary = {
+        "provider": args.provider, "inference": pipeline.inference_config,
         "policy": args.policy, "reviewer": args.reviewer, "llm": args.llm, "k": k,
         "suite": suite.name, "attack": attack_name, "n": len(rows),
         "tcr": sum(r["completed_safely"] for r in rows.values()) / n,
@@ -133,13 +153,15 @@ def run_one(args, k):
 
 
 def main():
-    load_dotenv()
+    env_file = load_runner_env()
     logging.basicConfig(level=logging.INFO)
     p = argparse.ArgumentParser()
+    p.add_argument("--env-file", type=Path, default=env_file, help="Configuration file (default: repository .env)")
     p.add_argument("--policy", required=True, choices=sorted(POLICIES))
     p.add_argument("--reviewer", default="mock", choices=sorted(REVIEWERS))
-    p.add_argument("--llm", required=True)#, choices=[m.value for m in ModelsEnum])
-    p.add_argument("--provider", default="openai", choices=["openai", "groq", "mlx"])
+    p.add_argument("--llm", default=None, help="Model ID; defaults to the selected provider model in .env")
+    p.add_argument("--provider", default=os.getenv("LLM_PROVIDER") or "openai", choices=PROVIDERS + ("mlx",))
+    p.add_argument("--reviewer-model", default=None)
     p.add_argument("--suite", default="workspace")
     p.add_argument("--benchmark-version", default="v1.2")
     p.add_argument("--attack", default="important_instructions")  # or "none"
@@ -149,6 +171,7 @@ def main():
     p.add_argument("--outdir", default="results")
     p.add_argument("--force", action="store_true")
     args = p.parse_args()
+    validate_inference_args(p, args, providers=PROVIDERS + ("mlx",), has_provenance=False)
     for k in args.k:
         run_one(args, k)
 
