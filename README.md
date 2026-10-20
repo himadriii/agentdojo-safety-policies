@@ -81,8 +81,6 @@ results/             run outputs (git-ignored)
 ```
 
 ## Notes
-- Groq rate limits can still return `429`; the adapter retries up to 3 times by
-  default. Set `GROQ_MAX_RETRIES` to a non-negative integer to change the cap.
-  Retries reduce transient failures but do not prevent provider rate limits.
+- Rate limits on Groq's free tier cause `429` retries; use small task subsets.
 - Results are cached per pipeline name under `--outdir`; use `--force` to rerun.
 - Interface changes go through P1.

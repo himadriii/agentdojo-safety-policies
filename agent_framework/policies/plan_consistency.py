@@ -5,19 +5,32 @@ uses only the visible user task, proposed call and prior assistant tool calls;
 it never reads benchmark labels or hidden environment state.
 """
 
+import logging
 import re
 from collections.abc import Mapping
 
 from agent_framework.policy import Policy
 
+log = logging.getLogger(__name__)
+
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+", re.IGNORECASE)
 _EMAIL_RE = re.compile(r"[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}", re.IGNORECASE)
+_TASK_RECIPIENT_RE = re.compile(
+    r"(?:\bto\s+|\b(?:email|mail)\s+)(?P<address>"
+    + _EMAIL_RE.pattern
+    + r")",
+    re.IGNORECASE,
+)
+_EXPLICIT_SEND_RE = re.compile(
+    r"\b(?:send|mail)\b|\bemail\s+(?!addresses?\b)", re.IGNORECASE
+)
 _STOP_WORDS = {
     "a", "an", "and", "are", "as", "at", "be", "by", "for", "from",
     "in", "into", "is", "it", "of", "on", "or", "please", "that", "the",
     "this", "to", "with", "your", "my", "user", "task", "call", "tool",
     "file", "files", "query", "content", "arguments", "args",
+    "search", "read", "get",
 }
 _ALIASES = {
     "find": "search", "locate": "search", "lookup": "search", "look": "search",
@@ -26,26 +39,16 @@ _ALIASES = {
     "summarising": "summary", "forward": "send", "share": "send", "upload": "send",
     "publish": "send", "remove": "delete",
     "erase": "delete", "purchase": "buy", "save": "write",
+    "reschedule": "update",
 }
 _SIDE_EFFECT_VERBS = {
     "send", "share", "upload", "publish", "transfer", "buy", "purchase",
     "post", "invite", "delete", "remove", "write", "save", "create",
     "update", "execute",
 }
+_IDENTIFIER_KEYS = {"to", "recipient", "recipients", "user_id", "email", "email_address",
+                    "id", "file_id", "path", "filename", "day", "date", "event_id"}
 _READ_TOOL_PREFIXES = ("search_", "find_", "lookup_", "get_", "read_", "open_", "list_", "fetch_")
-_REQUESTED_EMAIL_RE = re.compile(
-    r"(?:^|\b)(?:please\s+)?(?:email|mail)\s+(?:the\s+|a\s+|an\s+|this\s+|that\s+|it\s+|me\s+)?[a-z0-9]",
-    re.IGNORECASE,
-)
-_CALENDAR_TASK_TERMS = {"calendar", "event", "meeting", "appointment", "schedule"}
-_DATE_OR_TIME_RE = re.compile(
-    r"\b(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}/\d{1,2}(?:/\d{2,4})?|"
-    r"today|tomorrow|yesterday|morning|afternoon|evening)\b|"
-    r"\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|"
-    r"jul(?:y)?|aug(?:ust)?|sep(?:tember|t)?|oct(?:ober)?|nov(?:ember)?|"
-    r"dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?\b",
-    re.IGNORECASE,
-)
 
 
 def _normalize(text):
@@ -54,10 +57,9 @@ def _normalize(text):
         return set()
     tokens = set()
     for raw in _TOKEN_RE.findall(str(text)):
-        word = raw.lower()
+        word = _ALIASES.get(raw.lower(), raw.lower())
         if word in _STOP_WORDS or len(word) <= 1:
             continue
-        word = _ALIASES.get(word, word)
         if word.endswith("ing") and len(word) > 5:
             word = word[:-3]
         elif word.endswith("ed") and len(word) > 4:
@@ -81,7 +83,14 @@ def _call_parts(call):
 
 def _call_text(call):
     name, args = _call_parts(call)
-    return f"{name} {args}"
+    return _relevance_text(name, args)
+
+
+def _relevance_text(tool_name, args):
+    """Use tool identity and structured identifiers, never attacker-written prose."""
+    identifiers = {key: value for key, value in args.items()
+                   if key.lower() in _IDENTIFIER_KEYS}
+    return f"{tool_name} {identifiers}"
 
 
 def _prior_tool_texts(trajectory):
@@ -110,32 +119,30 @@ def _dice(left, right):
 
 
 def _explicit_recipient_mismatch(task, call_text):
-    expected = {address.lower() for address in _EMAIL_RE.findall(task)}
+    expected = {match.group("address").lower() for match in _TASK_RECIPIENT_RE.finditer(task)}
     actual = {address.lower() for address in _EMAIL_RE.findall(call_text)}
     return bool(expected and actual and expected.isdisjoint(actual))
 
 
-def _requested_side_effect(task, tool_name, tool_terms):
-    """Require an action in the task, not merely a noun such as 'emails'."""
+def _requested_side_effect(task, tool_name, args, tool_terms):
+    """Require explicit action authorization and, for sends, an authorized target."""
     if tool_name.lower().startswith(_READ_TOOL_PREFIXES):
         return False
     effect_terms = tool_terms & _SIDE_EFFECT_VERBS
     if not effect_terms:
         return False
     task_terms = _normalize(task)
-    if task_terms & effect_terms:
-        return True
-    return bool("send" in effect_terms and _REQUESTED_EMAIL_RE.search(task))
-
-
-def _supported_calendar_read(task, tool_name):
-    """Recognize common calendar lookups that the agent uses as prerequisites."""
-    name = tool_name.lower()
-    terms = _normalize(task)
-    calendar_tool = "calendar" in name or name == "get_current_day"
-    if not calendar_tool:
-        return False
-    return bool(terms & _CALENDAR_TASK_TERMS) or bool(_DATE_OR_TIME_RE.search(task))
+    if "send" in effect_terms or "email" in tool_name.lower():
+        explicit_send = bool(task_terms & {"send", "mail"}) or bool(_EXPLICIT_SEND_RE.search(task))
+        requested_addresses = {
+            match.group("address").lower()
+            for match in _TASK_RECIPIENT_RE.finditer(task)
+        }
+        actual_addresses = {x.lower() for x in _EMAIL_RE.findall(str(args))}
+        # Without an address/name explicitly present in both task and call, a
+        # generic phrase like “share the report” cannot authorize a recipient.
+        return explicit_send and bool(requested_addresses & actual_addresses)
+    return bool(task_terms & effect_terms)
 
 
 class PlanConsistencyPolicy(Policy):
@@ -158,7 +165,7 @@ class PlanConsistencyPolicy(Policy):
             task = str(context.get("task", ""))
             call = context["proposed_call"]
             tool_name, args = _call_parts(call)
-            call_text = f"{tool_name} {args}"
+            call_text = _relevance_text(tool_name, args)
             task_terms = _normalize(task)
             call_terms = _normalize(call_text)
             task_relevance = _dice(task_terms, call_terms)
@@ -171,9 +178,17 @@ class PlanConsistencyPolicy(Policy):
             relevance = 0.8 * task_relevance + 0.2 * trajectory_support
 
             tool_terms = _normalize(tool_name)
-            requested_effect = _requested_side_effect(task, tool_name, tool_terms)
+            requested_effect = _requested_side_effect(task, tool_name, args, tool_terms)
             has_side_effect = bool(tool_terms & _SIDE_EFFECT_VERBS) and not tool_name.lower().startswith(_READ_TOOL_PREFIXES)
             unrequested_effect = has_side_effect and not requested_effect
+            send_intent_without_verified_recipient = (
+                unrequested_effect
+                and "email" in tool_name.lower()
+                and (
+                    bool(task_terms & {"send", "mail"})
+                    or bool(_EXPLICIT_SEND_RE.search(task))
+                )
+            )
             recipient_mismatch = _explicit_recipient_mismatch(task, call_text)
             destructive = bool(tool_terms & {"delete", "remove", "execute"})
 
@@ -191,15 +206,16 @@ class PlanConsistencyPolicy(Policy):
             elif task_relevance <= self.deny_threshold and destructive:
                 decision = "deny"
                 reason = "Clearly unrelated destructive action."
-            elif unrequested_effect and task_relevance < self.approve_threshold:
+            elif (unrequested_effect and task_relevance < self.approve_threshold
+                  and not send_intent_without_verified_recipient):
                 decision = "deny"
                 reason = "Side effect is unrelated to the task and was not requested."
             elif unrequested_effect:
                 decision = "escalate"
                 reason = "Proposed side effect was not requested in the task."
-            elif _supported_calendar_read(task, tool_name):
+            elif tool_name.lower().startswith(_READ_TOOL_PREFIXES) and task_relevance >= self.approve_threshold:
                 decision = "approve"
-                reason = "Read-only calendar lookup supports the task's date or event request."
+                reason = "Read-only call is relevant to the task."
             elif task_relevance >= self.approve_threshold and relevance >= self.approve_threshold:
                 decision = "approve"
                 reason = "Call is lexically relevant to the task and consistent with the trajectory."
@@ -210,6 +226,7 @@ class PlanConsistencyPolicy(Policy):
             return decision, state, {"reason": reason, "scores": scores}
         except Exception as exc:
             # A malformed context must not crash the benchmark or auto-approve.
+            log.exception("Plan consistency policy failed to evaluate a call")
             return "escalate", state, {
                 "reason": f"Policy could not evaluate call ({type(exc).__name__}).",
                 "scores": {},
