@@ -77,3 +77,10 @@ def test_course_final_is_preassigned_matched_and_held_out(tmp_path):
         assert counts == {f'injection_task_{i}': 9 for i in (2, 7, 9, 10)}
     with pytest.raises(ValueError, match='frozen final'):
         make_plan('development', profile='course')
+
+
+def test_handoff_cannot_silently_change_reviewer_provider(tmp_path, monkeypatch):
+    from p2_anomaly.experiments import run_plan
+    monkeypatch.setenv('REVIEWER_PROVIDER', 'lmstudio')
+    with pytest.raises(ValueError, match='pins the reviewer'):
+        run_plan(tmp_path / 'unused-plan.json', 1)

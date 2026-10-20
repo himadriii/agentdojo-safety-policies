@@ -183,11 +183,14 @@ def run_plan(plan_path, max_jobs, artifact=None, resume_after_quota=False):
     if max_jobs < 1:
         raise ValueError('max-jobs must be positive')
     load_dotenv(ROOT / '.env')
+    if os.getenv('REVIEWER_PROVIDER', 'groq') != 'groq':
+        raise ValueError('This P2 plan pins the reviewer to Groq; set REVIEWER_PROVIDER=groq for matched evaluation')
     if not os.getenv('GROQ_API_KEY'):
         raise ValueError('GROQ_API_KEY missing: configure local .env; do not paste it into chat')
     os.environ['GROQ_STOP_ON_QUOTA'] = '1'
     os.environ['GROQ_MAX_RETRIES'] = '0'
     os.environ['GROQ_REQUEST_INTERVAL_SECONDS'] = '20'
+    os.environ['GROQ_TIMEOUT'] = '45'
     plan_path = Path(plan_path).resolve()
     plan = json.loads(plan_path.read_text())
     validate_plan(plan)
