@@ -107,7 +107,7 @@ def test_policy_receives_documented_context():
     pipeline, _ = build(Recording(), queries=("a",))
     run(pipeline, task="Find my emails.")
     ctx = seen[0]
-    assert set(ctx) == {"task", "proposed_call", "environment", "trajectory", "remaining_budget", "metadata"}
+    assert set(ctx) == {"task", "proposed_call", "environment", "trajectory", "remaining_budget", "metadata", "tools"}
     assert ctx["task"] == "Find my emails."
     assert ctx["remaining_budget"] == 2
 
