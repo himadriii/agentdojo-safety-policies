@@ -24,6 +24,7 @@ from agent_framework.budget import EscalationBudget
 from agent_framework.policy import FullEscalatePolicy
 from agent_framework.reviewer import MockReviewer, build_reviewer_context
 from agent_framework.usage import TRACKER
+from agent_framework.tool_meta import get_tool_meta
 
 log = logging.getLogger(__name__)
 
@@ -99,7 +100,8 @@ class P1ToolsExecutor(ToolsExecutor):
                 "trajectory": copy.deepcopy(list(messages)),     # a policy can't corrupt the agent's conversation
                 "remaining_budget": self.budget.remaining,
                 "metadata": {"step": len(self.decisions),        # fresh dict per call
-                             "decision_history": copy.deepcopy(self.decisions)},
+                             "decision_history": copy.deepcopy(self.decisions),
+                             "tool": get_tool_meta(tool_name)}
             }
 
             policy_error = None

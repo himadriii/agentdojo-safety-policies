@@ -13,6 +13,8 @@ from agent_framework.budget import EscalationBudget
 from agent_framework.policy import FullEscalatePolicy, Policy
 from agent_framework.reviewer import MockReviewer
 from agent_framework.tools_executor import DENIAL_MESSAGE, P1ToolsExecutor, ResetTaskState
+from agent_framework.tool_meta import get_tool_meta
+
 
 EXECUTED = []
 
@@ -204,3 +206,31 @@ def test_policy_cannot_corrupt_agent_conversation():
     messages = run(pipeline)
     assert EXECUTED == ["a", "b"]
     assert messages[0]["role"] == "system" and len(messages) >= 5
+
+def test_policy_receives_tool_metadata():
+    seen = []
+
+    class Recording(Policy):
+        def evaluate(self, context, state):
+            seen.append(context["metadata"])
+            return "approve", state
+
+    pipeline, _ = build(Recording(), queries=("a",))
+    run(pipeline)
+
+    tool = seen[0]["tool"]
+    assert tool["read_only"] is True
+    assert tool["external_side_effect"] is False
+    assert tool["irreversible"] is False
+    assert tool["untrusted_output"] is True      # search_emails returns third-party text
+    assert tool["known"] is True
+
+def test_metadata_for_write_and_unknown_tools():
+    send = get_tool_meta("send_email")
+    assert send["read_only"] is False
+    assert send["external_side_effect"] and send["irreversible"]
+    assert "recipients" in send["target_args"]
+
+    unknown = get_tool_meta("some_new_tool")
+    assert unknown["known"] is False
+    assert unknown["read_only"] is False          # conservative: unknown non-read names are treated as writes
