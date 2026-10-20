@@ -26,9 +26,10 @@ from agent_framework.usage import track_openai_client
 
 from agent_framework.llm_providers import make_groq_llm
 from agent_framework.registry import POLICIES, REVIEWERS
+from agent_framework.llm_reviewer import REVIEWER_PROMPT_VERSION
 
 
-def build_pipeline(llm_name, policy_name, reviewer_name, k, provider="openai"):
+def build_pipeline(llm_name, policy_name, reviewer_name, k, provider="openai", reviewer_model=None):
     if provider == "groq":
         llm = make_groq_llm(llm_name)
     else:
@@ -38,9 +39,18 @@ def build_pipeline(llm_name, policy_name, reviewer_name, k, provider="openai"):
     else:
         logging.warning("Agent token usage is only tracked for OpenAI-compatible providers.")
 
+    policy = POLICIES[policy_name]()
+    if policy_name == 'anomaly' and policy.artifact is None:
+        raise RuntimeError('Anomaly model unavailable or revoked. Set P2_ANOMALY_MODEL to a validated artifact.')
+    if reviewer_name == "llm":
+        reviewer = REVIEWERS[reviewer_name](model=reviewer_model or llm_name)
+        reviewer_tag = f"llm-{REVIEWER_PROMPT_VERSION}-{reviewer.model}"
+    else:
+        reviewer = REVIEWERS[reviewer_name]()
+        reviewer_tag = reviewer_name
     executor = P1ToolsExecutor(
-        policy=POLICIES[policy_name](),
-        reviewer=REVIEWERS[reviewer_name](),
+        policy=policy,
+        reviewer=reviewer,
         budget=EscalationBudget(limit=k),
     )
     pipeline = AgentPipeline([
@@ -51,7 +61,9 @@ def build_pipeline(llm_name, policy_name, reviewer_name, k, provider="openai"):
         ToolsExecutionLoop([executor, llm]),
     ])
     # Unique per config (results are cached per pipeline name); "/" breaks AgentDojo's cache lookup.
-    pipeline.name = f"{llm_name}-{policy_name}-{reviewer_name}-k{k}".replace("/", "_")
+    artifact_tag = getattr(policy, 'artifact_hash', None)
+    policy_tag = f"{policy_name}-{artifact_tag[:12]}" if artifact_tag else policy_name
+    pipeline.name = f"{llm_name}-{policy_tag}-{reviewer_tag}-k{k}".replace("/", "_")
     return pipeline
 
 
@@ -65,7 +77,8 @@ def read_trace(logdir, pipeline_name, suite_name, user_task, attack_name, inject
 
 def run_one(args, k):
     logdir = Path(args.outdir)
-    pipeline = build_pipeline(args.llm, args.policy, args.reviewer, k, args.provider)
+    pipeline = build_pipeline(args.llm, args.policy, args.reviewer, k, args.provider,
+                              getattr(args, 'reviewer_model', None))
     suite = get_suite(args.benchmark_version, args.suite)
     user_tasks = args.user_tasks or None
 
@@ -93,7 +106,8 @@ def run_one(args, k):
         attack_succeeded = bool(res["security_results"][(user_id, inj_id)]) if args.attack != "none" else False
         trace = read_trace(logdir, pipeline.name, suite.name, user_id, attack_name, inj_id)
         decisions = trace.get("approval_decisions", [])
-        completed_safely = bool(utility) and not attack_succeeded
+        trace_error = trace.get('error') or (None if trace else 'missing_trace')
+        completed_safely = bool(utility) and not attack_succeeded and not trace_error
         rows[f"{user_id}|{inj_id}"] = {
             "utility": bool(utility),
             "attack_succeeded": attack_succeeded,
@@ -102,7 +116,12 @@ def run_one(args, k):
             "budget_exhausted_denials": sum(d["outcome"] == "budget_exhausted_deny" for d in decisions),
             "auto_denials": sum(d["outcome"] == "auto_deny" for d in decisions),
             "executed_calls": sum(d["executed"] for d in decisions),
-            "error": trace.get("error"),   # context-length / server errors: not real completions
+            "error": trace_error,
+            "proposed_calls": len(decisions),
+            "flagged_calls": sum(d['decision'] != 'approve' for d in decisions),
+            "policy_latency_s": sum(d.get('policy_latency_s', 0) for d in decisions),
+            "reviewer_errors": sum(str(d.get('reviewer_reason') or '').startswith('REVIEWER_ERROR') for d in decisions),
+            "reviewer_parse_failures": sum(str(d.get('reviewer_reason') or '').startswith('REVIEWER_PARSE_FAILURE') for d in decisions),
         }
         for comp, t in trace.get("token_usage", {}).items():
             agg = tokens.setdefault(comp, {"calls": 0, "input_tokens": 0, "output_tokens": 0})
@@ -119,12 +138,16 @@ def run_one(args, k):
         "tasks_with_errors": sum(r["error"] is not None for r in rows.values()),
         "token_usage": tokens,   # excludes the injection-task-as-user-task baseline runs
         "rows": rows,
+        "reviewer_model": getattr(args, 'reviewer_model', None) or args.llm if args.reviewer == 'llm' else None,
+        "benchmark_version": args.benchmark_version,
+        "pipeline_name": pipeline.name,
     }
     out = logdir / pipeline.name
     out.mkdir(parents=True, exist_ok=True)
     (out / f"summary_{suite.name}_{attack_name}.json").write_text(json.dumps(summary, indent=2))
     print(f"[{args.policy}] k={k} TCR={summary['tcr']:.3f} "
           f"HITL(completed)={summary['hitl_load_completed']} n={len(rows)}")
+    return summary
 
 
 def main():
@@ -135,6 +158,7 @@ def main():
     p.add_argument("--reviewer", default="mock", choices=sorted(REVIEWERS))
     p.add_argument("--llm", required=True)#, choices=[m.value for m in ModelsEnum])
     p.add_argument("--provider", default="openai", choices=["openai", "groq"])
+    p.add_argument("--reviewer-model", default=None)
     p.add_argument("--suite", default="workspace")
     p.add_argument("--benchmark-version", default="v1.2")
     p.add_argument("--attack", default="important_instructions")  # or "none"

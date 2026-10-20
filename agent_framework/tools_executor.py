@@ -1,4 +1,6 @@
 import logging
+import copy
+import time
 from ast import literal_eval
 from collections.abc import Sequence
 
@@ -42,6 +44,7 @@ class P1ToolsExecutor(ToolsExecutor):
         self.budget = budget if budget is not None else EscalationBudget(limit=2)
         self.policy_state = {}
         self.decisions = []
+        self._reviewer_reason = None
 
     def reset_for_new_task(self):
         """Reset task-scoped state: escalation budget, policy state, logs, token counts."""
@@ -91,16 +94,25 @@ class P1ToolsExecutor(ToolsExecutor):
 
             context = {
                 "task": task_text,
-                "proposed_call": tool_call.model_copy(deep=True),  # policies can't mutate the real call
-                "environment": env,
-                "trajectory": messages,
+                "proposed_call": tool_call.model_copy(deep=True),
+                "environment": env,                              # read-only by contract
+                "trajectory": copy.deepcopy(list(messages)),     # a policy can't corrupt the agent's conversation
                 "remaining_budget": self.budget.remaining,
-                "metadata": extra_args,
+                "metadata": {"step": len(self.decisions),        # fresh dict per call
+                             "decision_history": copy.deepcopy(self.decisions)},
             }
 
-            decision, self.policy_state, info = self._unpack(
-                self.policy.evaluate(context, self.policy_state)
-            )
+            policy_error = None
+            t0 = time.perf_counter()
+            try:
+                decision, self.policy_state, info = self._unpack(
+                    self.policy.evaluate(context, self.policy_state))
+            except Exception as exc:       # one buggy policy must not kill a whole benchmark run
+                log.exception("[P1] policy raised; falling back to escalate")
+                decision, info = "escalate", {"reason": "POLICY_ERROR", "scores": {}}
+                policy_error = f"{type(exc).__name__}: {exc}"[:300]
+            latency = time.perf_counter() - t0
+
             outcome, approved, reviewer_called = self._resolve(decision, context, info)
 
             self.decisions.append({
@@ -110,10 +122,14 @@ class P1ToolsExecutor(ToolsExecutor):
                 "outcome": outcome,
                 "executed": approved,
                 "reviewer_called": reviewer_called,
+                "reviewer_reason": self._reviewer_reason if reviewer_called else None,
                 "budget_remaining": self.budget.remaining,
                 "reason": info.get("reason"),
                 "scores": info.get("scores"),
+                "policy_error": policy_error,
+                "policy_latency_s": round(latency, 4),
             })
+
             trace_logger = Logger.get()
             if hasattr(trace_logger, "set_contextarg"):  # NullLogger has no such method
                 trace_logger.set_contextarg("approval_decisions", self.decisions)
@@ -132,6 +148,7 @@ class P1ToolsExecutor(ToolsExecutor):
 
     def _resolve(self, decision, context, info):
         """Returns (outcome, approved, reviewer_called)."""
+        self._reviewer_reason = None
         if decision == "approve":
             return "auto_approve", True, False
         if decision == "deny":
@@ -143,6 +160,7 @@ class P1ToolsExecutor(ToolsExecutor):
                 context["task"], context["proposed_call"], context["trajectory"], info.get("reason")
             )
             approved = self.reviewer.review(reviewer_context) == "approve"
+            self._reviewer_reason = getattr(self.reviewer, "last_reason", None)
             return ("escalate_approved" if approved else "escalate_denied"), approved, True
         log.warning("[P1] Unknown policy decision %r; denying call.", decision)
         return "unknown_decision_deny", False, False

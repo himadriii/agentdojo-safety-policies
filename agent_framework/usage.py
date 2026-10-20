@@ -6,6 +6,7 @@ COMPONENTS = ("agent", "policy", "reviewer")
 
 class UsageTracker:
     def __init__(self):
+        self.lifetime = {c: {"calls": 0, "input_tokens": 0, "output_tokens": 0} for c in COMPONENTS}
         self.reset()
 
     def reset(self):
@@ -16,6 +17,10 @@ class UsageTracker:
         t["calls"] += 1
         t["input_tokens"] += input_tokens or 0
         t["output_tokens"] += output_tokens or 0
+        lifetime = self.lifetime[component]
+        lifetime['calls'] += 1
+        lifetime['input_tokens'] += input_tokens or 0
+        lifetime['output_tokens'] += output_tokens or 0
         log = Logger.get()
         if hasattr(log, "set_contextarg"):  # NullLogger has no such method
             log.set_contextarg("token_usage", self.totals)
