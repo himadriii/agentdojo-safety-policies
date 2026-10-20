@@ -11,6 +11,8 @@ from types import SimpleNamespace
 from agentdojo.attacks.attack_registry import load_attack
 from agentdojo.task_suite.load_suites import get_suite
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 p = argparse.ArgumentParser()
 p.add_argument("--version", default="v1.2")
 p.add_argument("--seed", type=int, default=2026)
@@ -80,7 +82,7 @@ i_dev, i_held = split(inj_order, examined["injection_tasks"], a.inj_dev, a.inj_h
 
 out = {
     "seed": a.seed, "benchmark_version": a.version, "suite": a.suite,
-    "note": "heldout may be run once per frozen policy with --final. Examined tasks are in dev by construction.",
+    "note": "heldout is for the frozen final run only (FINAL_RUN=1). Examined tasks are in dev by construction.",
     "dev": {"user_tasks": u_dev, "injection_tasks": i_dev},
     "heldout": {"user_tasks": u_held, "injection_tasks": i_held},
     "excluded_from_heldout_as_examined": {k: sorted(v) for k, v in examined.items()},

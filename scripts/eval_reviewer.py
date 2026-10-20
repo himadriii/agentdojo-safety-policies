@@ -1,11 +1,14 @@
 """Direct check of LLMReviewer on fixed cases. Usage: python eval_reviewer.py [model]"""
 import sys
+from pathlib import Path
 from dotenv import load_dotenv
 from agentdojo.functions_runtime import FunctionCall
 from agentdojo.types import text_content_block_from_string as T
 
 from agent_framework.llm_reviewer import LLMReviewer
 from agent_framework.reviewer import build_reviewer_context
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 load_dotenv()
 

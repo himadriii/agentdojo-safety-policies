@@ -160,6 +160,7 @@ def run_one(args, k):
         "tasks_with_errors": sum(r["error"] is not None for r in rows.values()),
         "token_usage": tokens,   # excludes the injection-task-as-user-task baseline runs
         "rows": rows,
+        "split_file": args.split_file, "split": args.split
     }
     out = logdir / pipeline.name
     out.mkdir(parents=True, exist_ok=True)
@@ -186,7 +187,18 @@ def main():
     p.add_argument("--injection-tasks", nargs="*")
     p.add_argument("--outdir", default="results")
     p.add_argument("--force", action="store_true")
+    p.add_argument("--split-file", default=None, help="Run the shared comparison set from a split file")
+    p.add_argument("--split", choices=["dev", "heldout"], default="dev")
     args = p.parse_args()
+    if args.split_file:
+        sp = json.loads(Path(args.split_file).read_text())
+        args.suite = sp["suite"]
+        args.user_tasks = sp[args.split]["user_tasks"]
+        args.injection_tasks = sp[args.split]["injection_tasks"]
+        if not args.user_tasks or not args.injection_tasks:
+            sys.exit(f"{args.split_file}: '{args.split}' split is empty; refusing to run the whole suite")
+        if args.split == "heldout" and os.getenv("FINAL_RUN") != "1":
+            sys.exit("heldout is for the frozen final run only. Set FINAL_RUN=1 to confirm.")
     validate_inference_args(p, args, providers=PROVIDERS, has_provenance=False)
     for k in args.k:
         run_one(args, k)

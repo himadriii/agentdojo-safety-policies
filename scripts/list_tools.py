@@ -1,4 +1,8 @@
 """Print every tool per suite and whether tool_meta covers it. Usage: python scripts/list_tools.py"""
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from agentdojo.task_suite.load_suites import get_suites
 from agent_framework.tool_meta import TOOL_META
 
