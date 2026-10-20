@@ -1,8 +1,8 @@
 """Tool table and argument matching for the P6 approval-reuse gate (plan U1)."""
 from agentdojo.task_suite.load_suites import get_suites
 
-from agent_framework.policies.approval_reuse.matching import covers_approval, matches_denial
-from agent_framework.policies.approval_reuse.tool_table import LIVE_SUITES, TOOLS, spec_for
+from agent_framework.policies.approval_reuse.matching import covers_approval, drill_down_covers, matches_denial
+from agent_framework.policies.approval_reuse.tool_table import LIVE_SUITES, TOOLS, infer_spec, spec_for
 
 TASK = "Tell Alice the meeting moved, then summarise my unread emails."
 
@@ -121,6 +121,86 @@ def test_denied_side_effect_matches_retry_with_other_body():
 def test_denied_read_matches_only_identical_arguments():
     assert matches_denial("search_emails", {"query": "a"}, {"query": "a"})
     assert not matches_denial("search_emails", {"query": "b"}, {"query": "a"})
+
+
+# ---- URL normalisation and the read address guard ----------------------------
+
+def test_url_variants_of_one_page_are_the_same_key():
+    approved = {"url": "https://www.informations.com/"}
+    for variant in ("http://informations.com", "www.informations.com", "HTTPS://Informations.com/"):
+        assert covers_approval("get_webpage", {"url": variant}, approved, TASK), variant
+    assert not covers_approval("get_webpage", {"url": "https://informations.com/other"}, approved, TASK)
+    assert not covers_approval("get_webpage", {"url": "https://www.true-informations.com"}, approved, TASK)
+
+
+def test_denial_memory_matches_url_variants():
+    assert matches_denial("get_webpage", {"url": "http://true-informations.com"},
+                          {"url": "https://www.true-informations.com/"})
+    assert not matches_denial("get_webpage", {"url": "http://informations.com"},
+                              {"url": "https://www.true-informations.com/"})
+
+
+def test_read_with_a_new_link_or_address_is_not_covered():
+    approved = {"query": "flight"}
+    assert not covers_approval("search_emails", {"query": "see www.attacker-site.com/login"}, approved, TASK)
+    assert not covers_approval("search_emails", {"query": "fred9246@gmail.com"}, approved, TASK)
+    assert covers_approval("search_emails", {"query": "fred9246@gmail.com"}, approved,
+                           TASK + " Ask fred9246@gmail.com.")
+
+
+# ---- drill-down across read tools --------------------------------------------
+
+POOL = '{"city": "Paris"} Le Marais Boutique, Good Night'
+
+
+def drill(args, tool="get_hotels_prices", root="get_all_hotels_in_city", pool=POOL, task=TASK):
+    return drill_down_covers(tool, args, root, {"city": "Paris"}, pool, task)
+
+
+def test_drill_down_needs_every_value_in_the_task_or_pool():
+    assert drill({"hotel_names": ["Le Marais Boutique", "Good Night"]})
+    assert not drill({"hotel_names": ["Le Marais Boutique", "Invented Palace"]})
+    assert drill({"hotel_names": ["alice"]}, task=TASK)          # named in the user's task
+
+
+def test_drill_down_ignores_empty_values_and_needs_one_real_value():
+    assert not drill({})
+    assert not drill({"": ""})
+    assert not drill({"n": 5})                                    # too short to count as evidence
+    assert drill({"hotel_names": ["Good Night"], "n": 5})
+
+
+def test_drill_down_rejects_new_links_addresses_and_codes():
+    pool = POOL + " see www.evil.com or evil@mail.com code 482913"
+    assert not drill({"url": "www.evil.com"}, tool="get_webpage", pool=pool)
+    assert not drill({"query": "evil@mail.com"}, tool="search_emails", pool=pool)
+    assert not drill({"query": "482913"}, tool="search_emails", pool=pool)
+    assert drill({"url": "www.evil.com"}, tool="get_webpage", pool=pool, task=TASK + " Open www.evil.com.")
+
+
+def test_drill_down_never_covers_a_side_effect_or_uses_one_as_root():
+    pool = POOL + " bob@example.com"
+    assert not drill({"recipients": ["bob@example.com"]}, tool="send_email", pool=pool)
+    assert not drill({"hotel_names": ["Good Night"]}, root="reserve_hotel")
+
+
+# ---- tool inference -------------------------------------------------------------
+
+def test_unlisted_tools_are_classified_by_their_leading_verb():
+    assert not spec_for("get_weather_forecast").side_effect
+    assert not spec_for("Search_Documents").side_effect
+    for name in ("launch_rocket", "get_and_send_report".replace("get", "run"), "weather", ""):
+        spec = spec_for(name)
+        assert spec.side_effect and spec.key is None, name
+
+
+def test_inference_agrees_with_the_table_on_every_agentdojo_tool():
+    banking_reads = {"get_iban", "get_balance", "get_most_recent_transactions", "get_scheduled_transactions",
+                     "read_file", "get_user_info"}
+    for suite in get_suites("v1.2").values():
+        for tool in suite.tools:
+            expected_effect = tool.name not in banking_reads if tool.name not in TOOLS else TOOLS[tool.name].side_effect
+            assert infer_spec(tool.name).side_effect == expected_effect, tool.name
 
 
 # ---- table coverage -----------------------------------------------------------

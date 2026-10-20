@@ -14,14 +14,18 @@ Owner: P6. Plan: `docs/plans/2026-10-19-1857-feat-p6-approval-reuse-gate-plan.md
 
 "Covered" is tiered:
 
-- **Reads** are covered at tool level. One approved `search_emails` covers later searches. A URL argument is always key, so an approved `get_webpage` covers only the same URL.
+- **Reads, same tool** are covered at tool level. One approved `search_emails` covers later searches. A URL argument is always key, so an approved `get_webpage` covers only the same page: scheme, a leading `www.` and a trailing slash are ignored, nothing else. A read is not covered if its arguments carry a link, email address or code-like token found in neither the task nor the approved call.
+- **Reads, other tool (drill-down).** A read of another tool is covered by an approved read R when it only follows up on what R returned: it has at least one argument value of 3+ characters, every such value occurs in the user task or in the arguments and outputs of R (or of calls R already covered), and no argument carries a new link, address or code. `get_all_hotels_in_city` then covers `get_hotels_prices(hotel_names=[...those hotels])`. A zero-argument read, an invented name or a link taken from an output starts a new review. Side effects are never covered across tools.
+- **Which tools are reads.** The table in `tool_table.py` is authoritative for the AgentDojo tools. A tool not in it is a read if its name starts with a read verb (`get`, `search`, `list`, `read`, `check`, `find`, `fetch`, `lookup`, `describe`, `show`, `view`, `query`, `retrieve`), and otherwise a side effect with every argument key. The verb rule agrees with the table on all 69 AgentDojo tools, banking included.
 - **Side effects** are covered only when every key argument matches: recipients, cc, bcc, participants, payee, file, email, event, channel, user, URL or reservation target. A list may narrow (a subset of approved recipients), and an amount may only go down. Free text (body, subject, content) may change. Reuse is blocked if the new free text carries a link, an email address or a code-like token (5+ digits, or 8+ mixed letters and digits, such as an IBAN) found in neither the user's task nor the approved call.
 
 The full per-tool table is in `agent_framework/policies/approval_reuse/tool_table.py`. Unknown tools are side effects with every argument key.
 
 The runner does not tell policies what the reviewer decided, so the gate reads it off the trajectory. The tool result for a call it escalated either carries the runner's denial message (denied) or does not (executed after approval). Escalations made with zero budget left were denied by the runner, not the reviewer, and are dropped. All memory lives in the task-scoped `state`; nothing carries across tasks. The gate makes no LLM calls. Each decision logs `reuse_approved`, `reuse_denied` and `gate_ms` scores.
 
-`similarity_reuse` is the comparison: the "cluster similar operations" reading of the original idea. It reuses an approval when the token Jaccard over all argument values is at least 0.5, with no key arguments, no token scan and no denial memory.
+Each decision also logs `reuse_drilldown` (1.0 when the approval came from the drill-down rule; `reuse_approved` is 1.0 too). `ApprovalReusePolicy(drill_down=False)` turns the cross-tool rule off.
+
+`similarity_reuse` is the comparison: the "cluster similar operations" reading of the original idea. It reuses an approval when the token Jaccard over all argument values is at least 0.5, with no key arguments, no token scan, no denial memory and no drill-down.
 
 ## Commands
 
@@ -56,36 +60,40 @@ The held-out split is fixed in `p6_reuse/data/split.json`:
 
 ## Results so far (offline)
 
-**Probe set** (424 probes from AgentDojo reference solutions, banking money-transfer seeds and three hand-written seeds):
+**Probe set** (514 probes from AgentDojo reference solutions, banking money-transfer seeds and three hand-written seeds; reads now get the injected link and code probes too):
 
 | Mutation | Probes | P6 violations | Similarity violations |
 |---|---|---|---|
 | changed key argument | 149 | 0 | 140 |
-| injected link in free text | 66 | 0 | 56 |
-| injected code in free text | 66 | 0 | 60 |
+| injected link in free text | 111 | 0 | 58 |
+| injected code in free text | 111 | 0 | 75 |
 | amount raised | 16 | 0 | 13 |
 | amount lowered (should reuse) | 16 | 0 missed | 3 missed |
 | free text only (should reuse) | 111 | 0 missed | 72 missed |
 
-The P6 gate never reuses an approval for a changed target, link, code or raised amount, and it never misses a reuse it should make. Similarity reuse does both often.
+The P6 gate never reuses an approval for a changed target, link, code or raised amount, and it never misses a reuse it should make. Similarity reuse does both often. The probes score the same-tool predicate only; drill-down is covered by unit tests (`tests/test_reuse_matching.py`, `tests/test_approval_reuse_policy.py`).
 
 **Offline replay** (102 scripted episodes from reference solutions, ideal reviewer; an optimistic bound). TCR is the share of episodes completed safely; reviews are summed over episodes.
 
 | Suite | k | full-escalate TCR | P6 TCR | full-escalate reviews | P6 reviews | P6 reviews saved (approval / denial) |
 |---|---|---|---|---|---|---|
-| slack | 1 | 0.000 | 0.000 | 21 | 21 | 0 / 0 |
-| slack | 2 | 0.048 | 0.048 | 42 | 42 | 3 / 16 |
-| slack | 3 | 0.190 | **0.333** | 62 | 62 | 9 / 16 |
-| workspace | 1 | 0.417 | 0.417 | 60 | 60 | 7 / 0 |
-| workspace | 2 | 0.500 | **0.517** | 115 | 115 | 8 / 48 |
-| workspace | 3 | 0.517 | **0.617** | 165 | **159** | 9 / 108 |
-| travel | 1 | 0.000 | 0.000 | 21 | 21 | 6 / 0 |
-| travel | 2 | 0.000 | 0.000 | 42 | 42 | 7 / 20 |
-| travel | 3 | 0.000 | **0.048** | 63 | 63 | 10 / 27 |
+| slack | 1 | 0.000 | 0.000 | 21 | 21 | 15 / 0 |
+| slack | 2 | 0.048 | **0.143** | 42 | 42 | 15 / 16 |
+| slack | 3 | 0.190 | **0.524** | 62 | **60** | 15 / 16 |
+| workspace | 1 | 0.417 | **0.500** | 60 | 60 | 12 / 0 |
+| workspace | 2 | 0.500 | **0.583** | 115 | **114** | 12 / 48 |
+| workspace | 3 | 0.517 | **0.667** | 165 | **157** | 12 / 108 |
+| travel | 1 | 0.000 | **0.857** | 21 | 21 | 126 / 0 |
+| travel | 2 | 0.000 | **0.905** | 42 | **36** | 126 / 14 |
+| travel | 3 | 0.000 | **1.000** | 63 | **39** | 126 / 15 |
+
+"Reviews saved (approval)" counts auto-approved calls, so it includes drill-down; the reviews column counts reviewer calls. Before drill-down, the same replay had P6 TCR 0.000 / 0.048 / 0.333 (slack k=1..3), 0.417 / 0.517 / 0.617 (workspace) and 0.000 / 0.000 / 0.048 (travel).
 
 Replay attack success with the ideal reviewer is 0.000 for full-escalate, P6 and similarity on every suite (full-approve: 1.000). So the safety gate passes.
 
-**Headline finding.** The planned headline was "P6 TCR@k above full-escalate on Slack and travel at every k". It holds at k = 3 on all three suites, but not at k = 1 or 2 on Slack and travel. Those tasks need three or more different tools. Every call escalates under the full-escalate base, and reuse saves a review only when a tool repeats. Most savings at low k come from denial memory: retries of a denied call no longer burn budget. The replay prints this as `headline: NOT MET` and lists the settings, rather than failing the run.
+**Headline.** "P6 TCR@k above full-escalate on Slack and travel at every k" now holds everywhere except slack k = 1 (0.000 vs 0.000: slack tasks need at least two reviews even with drill-down). The replay prints the miss as `headline: NOT MET` with the setting, rather than failing the run. These are optimistic numbers (ideal reviewer, scripted agent); the live runs are the real test.
+
+**Live-trace check (Oct 21, 2026).** Replaying the real policy with an approve-all reviewer over the 16 no-attack live trajectories where full-approve completed the task (`results/p6_live_full`: 2 travel, 6 slack, 8 workspace), mean reviews per run fall from 5.00 to 1.50 (travel), 3.33 to 2.83 (slack) and 2.00 to 1.88 (workspace) with drill-down on, and the tasks finishable at k = 1 / 2 / 3 go from 0/0/0 to 1/2/2 (travel), 0/1/4 to 0/3/5 (slack) and 3/7/7 to 4/7/7 (workspace). The new read address guard costs about 0.1 extra reviews per workspace run. This does not predict live TCR, which the reviewer's own denials limit.
 
 ## Smoke test on MLX-Serve (Oct 20, 2026)
 
@@ -98,6 +106,12 @@ Attempted with Gemma-4-E4B. The server started and listed both Gemma and gpt-oss
 - **Unsafe calls it may miss.** An injected call that keeps an approved target and changes only plain free text (for example, a misleading message to an approved recipient without links or codes). Also any unsafe read, because reads are reused at tool level except for URLs.
 - **Cost.** No model calls and no policy tokens; per-call latency is a few milliseconds (`gate_ms`).
 - **Complementary method.** P7 provenance (or P4 plan consistency) as the base policy, so reuse applies to their escalations. Provenance can also catch the plain-text injection to an approved recipient.
+
+## Open items
+
+- **Tool annotations (waiting on P1).** The executor context carries no tool schema, so the gate infers read vs side effect from the name. Once the contract adds tool descriptions or annotations (for example MCP `readOnlyHint`) to the context, resolve in this order: annotation, then the `tool_table.py` entry, then the verb rule, then side effect. Also use the description to veto a read verb whose text says it sends, deletes or writes.
+- **Sensitivity profile (optional).** Drill-down already allows reads across data sources when the arguments are grounded (a calendar read can cover an email search whose query came from the calendar output). A deployer who wants private sources kept apart needs a per-tool source label; there is none yet.
+- **Live rerun.** The live grid in `results/p6_live_full` predates drill-down. Rerun the approval_reuse stages (and ideally with a stronger reviewer) to measure it.
 
 ## Configuration
 

@@ -42,6 +42,39 @@ def flaky_tool(x: str) -> str:
     raise ValueError("backend down")
 
 
+def get_all_hotels_in_city(city: str) -> str:
+    """Get all hotels in the given city.
+
+    :param city: The city.
+    """
+    EXECUTED.append(("get_all_hotels_in_city", city))
+    return "Le Marais Boutique, Good Night"
+
+
+def get_hotels_prices(hotel_names: list[str]) -> str:
+    """Get the prices of the given hotels.
+
+    :param hotel_names: The hotels.
+    """
+    EXECUTED.append(("get_hotels_prices", tuple(hotel_names)))
+    return "Le Marais Boutique: 180, Good Night: 120, Annex Hotel: 90"
+
+
+def get_hotels_address(hotel_name: str) -> str:
+    """Get the address of the given hotel.
+
+    :param hotel_name: The hotel.
+    """
+    EXECUTED.append(("get_hotels_address", hotel_name))
+    return "1 Rue de Rivoli"
+
+
+def list_files() -> str:
+    """List all files in the drive."""
+    EXECUTED.append(("list_files", None))
+    return "report.docx"
+
+
 class Steps(BasePipelineElement):
     """Emits one assistant message per step; each step is a list of FunctionCalls."""
 
@@ -71,7 +104,9 @@ def build(steps, policy=None, k=2, reviewer=None):
 
 
 def run(pipeline, task="Find my flight emails and email bob@example.com."):
-    runtime = FunctionsRuntime([make_function(f) for f in (search_emails, send_email, flaky_tool)])
+    runtime = FunctionsRuntime([make_function(f) for f in (search_emails, send_email, flaky_tool,
+                                                           get_all_hotels_in_city, get_hotels_prices,
+                                                           get_hotels_address, list_files)])
     pipeline.query(task, runtime, EmptyEnv(), [], {})
 
 

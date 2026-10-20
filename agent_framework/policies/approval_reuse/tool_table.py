@@ -76,6 +76,16 @@ TOOLS.update({
 
 _UNKNOWN = ToolSpec(side_effect=True, key=None)
 
+# Leading verbs of read-only tools. Used only for tools missing from TOOLS, so the gate still
+# works on an unfamiliar tool set; anything else is treated as a side effect.
+READ_VERBS = frozenset({"get", "search", "list", "read", "check", "find", "fetch", "lookup", "describe",
+                        "show", "view", "query", "retrieve"})
+
+
+def infer_spec(tool: str) -> ToolSpec:
+    """Spec for a tool with no TOOLS entry: read-only if its name starts with a read verb, else unknown."""
+    return _read() if tool.split("_")[0].casefold() in READ_VERBS else _UNKNOWN
+
 
 def spec_for(tool: str) -> ToolSpec:
-    return TOOLS.get(tool, _UNKNOWN)
+    return TOOLS.get(tool) or infer_spec(tool)

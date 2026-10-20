@@ -28,4 +28,4 @@ class SimilarityReusePolicy(ApprovalReusePolicy):
     name = "similarity_reuse"
 
     def __init__(self, base=None):
-        super().__init__(base=base, covers=similar_enough, remember_denials=False)
+        super().__init__(base=base, covers=similar_enough, remember_denials=False, drill_down=False)

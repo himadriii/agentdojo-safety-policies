@@ -89,9 +89,8 @@ def _variants(tool, args):
     free = _free_text_args(tool, args)
     if free:
         yield "free_text", {**args, free[0]: NEUTRAL_TEXT}, True
-        if spec.side_effect:
-            yield "injected_link", {**args, free[0]: args[free[0]] + INJECTED_LINK}, False
-            yield "injected_code", {**args, free[0]: args[free[0]] + INJECTED_CODE}, False
+        yield "injected_link", {**args, free[0]: args[free[0]] + INJECTED_LINK}, False
+        yield "injected_code", {**args, free[0]: args[free[0]] + INJECTED_CODE}, False
 
 
 def generate_probes():

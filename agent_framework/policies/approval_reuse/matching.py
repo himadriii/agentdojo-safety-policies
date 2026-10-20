@@ -14,8 +14,16 @@ _DIGITS_RE = re.compile(r"\b\d{5,}\b")
 _MIXED_RE = re.compile(r"\b(?=[a-z0-9]*[a-z])(?=[a-z0-9]*\d)[a-z0-9]{8,}\b", re.I)
 
 
+_SCHEME_RE = re.compile(r"^https?://", re.I)
+MIN_GROUNDED_LEN = 3   # shorter argument values (ids, counts) do not count as evidence of a drill-down
+
+
 def _norm(value) -> str:
-    return str(value).strip().casefold()
+    """Case-folded text; links also lose the scheme, a leading www. and a trailing slash."""
+    text = str(value).strip().casefold()
+    if _SCHEME_RE.match(text) or text.startswith("www."):
+        text = _SCHEME_RE.sub("", text).removeprefix("www.").rstrip("/")
+    return text
 
 
 def _as_set(value) -> frozenset:
@@ -60,19 +68,52 @@ def injected_tokens(text: str, known: str) -> list[str]:
     return [t for t in found if t.casefold() not in known]
 
 
+def leaf_values(value) -> list[str]:
+    """Non-empty scalar values inside an argument value, flattened."""
+    if isinstance(value, dict):
+        return [v for x in value.values() for v in leaf_values(x)]
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [v for x in value for v in leaf_values(x)]
+    text = "" if value is None else str(value)
+    return [text] if text.strip() else []
+
+
+def _args_text(args: dict) -> str:
+    return " ".join(leaf_values(args))
+
+
 def covers_approval(tool: str, new_args: dict, approved_args: dict, task_text: str) -> bool:
     """True when an approval of `approved_args` also authorizes `new_args` for the same tool."""
     spec = spec_for(tool)
     for name in _key_names(spec, new_args, approved_args):
         if not _as_set(new_args.get(name)) <= _as_set(approved_args.get(name)):
             return False
-    if not spec.side_effect:
-        return True
+    known = f"{task_text} {json.dumps(approved_args, default=str)}"
+    if not spec.side_effect:   # a read may not smuggle in a new link, address or code either
+        return not injected_tokens(_free_text(tool, new_args), known)
     for name in spec.amount:
         if not _amount_within(new_args.get(name), approved_args.get(name)):
             return False
-    known = f"{task_text} {json.dumps(approved_args, default=str)}"
     return not injected_tokens(_free_text(tool, new_args), known)
+
+
+def drill_down_covers(tool: str, new_args: dict, root_tool: str, root_args: dict, pool: str, task_text: str) -> bool:
+    """True when a read of another tool only follows up on what an approved read already returned.
+
+    `pool` is the text the approved read (and the calls it covered) took and returned. Every
+    substantive argument value must occur in the task or the pool, there must be at least one
+    such value, and no argument may carry a link, address or code that the task and the approved
+    call do not already mention. Side effects are never covered across tools.
+    """
+    if spec_for(tool).side_effect or spec_for(root_tool).side_effect:
+        return False
+    values = [v for v in leaf_values(new_args) if len(v.strip()) >= MIN_GROUNDED_LEN]
+    if not values:
+        return False
+    if injected_tokens(_args_text(new_args), f"{task_text} {json.dumps(root_args, default=str)}"):
+        return False
+    haystack = f"{task_text} {pool}".casefold()
+    return all(v.strip().casefold() in haystack for v in values)
 
 
 def matches_denial(tool: str, new_args: dict, denied_args: dict) -> bool:

@@ -15,7 +15,9 @@ All memory lives in the task-scoped `state`; nothing carries across tasks.
 import json
 import time
 
-from agent_framework.policies.approval_reuse.matching import covers_approval, matches_denial
+from agentdojo.types import get_text_content_as_str
+
+from agent_framework.policies.approval_reuse.matching import covers_approval, drill_down_covers, matches_denial
 from agent_framework.policy import FullEscalatePolicy, Policy
 from agent_framework.tools_executor import DENIAL_MESSAGE
 
@@ -34,17 +36,18 @@ def _describe(record):
 class ApprovalReusePolicy(Policy):
     name = "approval_reuse"
 
-    def __init__(self, base=None, covers=covers_approval, remember_denials=True):
+    def __init__(self, base=None, covers=covers_approval, remember_denials=True, drill_down=True):
         self.base = base if base is not None else FullEscalatePolicy()
         self.covers = covers
         self.remember_denials = remember_denials
+        self.drill_down = drill_down
 
     def evaluate(self, context, state):
         start = time.perf_counter()
         state = {
             "base": state.get("base", {}),
             "pending": list(state.get("pending", [])),
-            "approved": list(state.get("approved", [])),
+            "approved": [{**r, "members": list(r.get("members", []))} for r in state.get("approved", [])],
             "denied": list(state.get("denied", [])),
         }
         try:
@@ -52,7 +55,8 @@ class ApprovalReusePolicy(Policy):
         except Exception as exc:
             return "escalate", state, {"reason": f"base policy failed ({type(exc).__name__}: {exc})"}
         info = dict(info or {})
-        info["scores"] = {"reuse_approved": 0.0, "reuse_denied": 0.0, **(info.get("scores") or {})}
+        info["scores"] = {"reuse_approved": 0.0, "reuse_denied": 0.0, "reuse_drilldown": 0.0,
+                          **(info.get("scores") or {})}
 
         try:
             self._resolve_pending(context["trajectory"], state)
@@ -79,7 +83,19 @@ class ApprovalReusePolicy(Policy):
                                                                    context["task"]):
                 info["reason"] = f"covered by a reviewer approval earlier in this task: {_describe(record)}"
                 info["scores"]["reuse_approved"] = 1.0
+                self._remember_member(record, call, context)
                 return "approve"
+        if self.drill_down:
+            for record in state["approved"]:
+                if record["function"] != call.function and drill_down_covers(
+                        call.function, args, record["function"], record["args"],
+                        self._pool(record, context["trajectory"]), context["task"]):
+                    info["reason"] = (f"drill-down on what a reviewer-approved read returned earlier in this task: "
+                                      f"{_describe(record)}")
+                    info["scores"]["reuse_approved"] = 1.0
+                    info["scores"]["reuse_drilldown"] = 1.0
+                    self._remember_member(record, call, context)
+                    return "approve"
         state["pending"].append({
             "id": call.id,
             "function": call.function,
@@ -89,6 +105,23 @@ class ApprovalReusePolicy(Policy):
         })
         info.setdefault("reason", "no earlier reviewer decision covers this call")
         return "escalate"
+
+    @staticmethod
+    def _remember_member(record, call, context):
+        """A call covered by `record` joins it, so its output can ground later drill-downs."""
+        record["members"].append({"id": call.id, "function": call.function, "args": dict(call.args),
+                                  "index": len(context["trajectory"])})
+
+    def _pool(self, record, trajectory):
+        """Text that the approved call and the calls it covered took as arguments and returned."""
+        parts, used = [], set()
+        for member in (record, *record["members"]):
+            parts.append(json.dumps(member["args"], default=str))
+            i = self._find_result(member, trajectory, used)
+            if i is not None:
+                used.add(i)
+                parts.append(get_text_content_as_str(trajectory[i].get("content") or []))
+        return " ".join(parts)
 
     @staticmethod
     def _find_result(record, trajectory, used):
@@ -120,5 +153,5 @@ class ApprovalReusePolicy(Policy):
             if trajectory[i].get("error") == DENIAL_MESSAGE:
                 state["denied"].append(record)
             else:
-                state["approved"].append(record)
+                state["approved"].append({**record, "members": []})
         state["pending"] = still_pending

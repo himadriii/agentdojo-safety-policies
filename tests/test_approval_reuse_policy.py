@@ -1,5 +1,6 @@
 """Approval reuse gate through the real P1ToolsExecutor pipeline (plan U2). No API key, no network."""
 from agent_framework.policies.approval_reuse.policy import ApprovalReusePolicy
+from agent_framework.policies.approval_reuse.similarity import SimilarityReusePolicy
 from agent_framework.policy import Policy
 from agent_framework.registry import POLICIES
 from agent_framework.reviewer import MockReviewer, Reviewer
@@ -172,6 +173,78 @@ def test_reason_names_the_earlier_call_and_scores_are_floats():
     assert "search_emails" in reused["reason"] and "flight" in reused["reason"]
     assert reused["scores"]["reuse_approved"] == 1.0
     assert all(isinstance(v, float) for v in reused["scores"].values())
+
+
+# ---- drill-down reuse across read tools --------------------------------------
+
+HOTEL_TASK = "Find me a hotel in Paris."
+
+
+def test_drill_down_on_an_approved_reads_output_is_reused_across_tools():
+    steps = [[call("get_all_hotels_in_city", "c1", city="Paris")],
+             [call("get_hotels_prices", "c2", hotel_names=["Le Marais Boutique", "Good Night"])],
+             [call("get_hotels_prices", "c3", hotel_names=["Le Marais Boutique"])]]
+    pipeline, executor = build(steps, k=1)
+    run(pipeline, task=HOTEL_TASK)
+    assert outcomes(executor) == ["escalate_approved", "auto_approve", "auto_approve"]
+    assert [d["scores"]["reuse_drilldown"] for d in executor.decisions] == [0.0, 1.0, 1.0]
+    assert "drill-down" in executor.decisions[1]["reason"]
+
+
+def test_output_of_a_covered_call_grounds_later_drill_downs():
+    steps = [[call("get_all_hotels_in_city", "c1", city="Paris")],
+             [call("get_hotels_prices", "c2", hotel_names=["Good Night"])],
+             [call("get_hotels_address", "c3", hotel_name="Annex Hotel")]]   # named only by the prices output
+    pipeline, executor = build(steps, k=1)
+    run(pipeline, task=HOTEL_TASK)
+    assert outcomes(executor) == ["escalate_approved", "auto_approve", "auto_approve"]
+
+
+def test_argument_not_grounded_in_an_approved_read_is_escalated():
+    steps = [[call("get_all_hotels_in_city", "c1", city="Paris")],
+             [call("get_hotels_prices", "c2", hotel_names=["Invented Palace"])]]
+    pipeline, executor = build(steps, k=2)
+    run(pipeline, task=HOTEL_TASK)
+    assert outcomes(executor) == ["escalate_approved", "escalate_approved"]
+
+
+def test_zero_argument_read_of_another_tool_is_escalated():
+    steps = [[call("search_emails", "c1", query="flight")], [call("list_files", "c2")]]
+    pipeline, executor = build(steps, k=2)
+    run(pipeline)
+    assert outcomes(executor) == ["escalate_approved", "escalate_approved"]
+
+
+def test_side_effect_is_never_covered_by_a_read_approval():
+    steps = [[call("get_all_hotels_in_city", "c1", city="Paris")],
+             [call("send_email", "c2", recipients=["bob@example.com"], body="Paris")]]
+    pipeline, executor = build(steps, k=2)
+    run(pipeline, task="Find a hotel in Paris and email bob@example.com.")
+    assert outcomes(executor) == ["escalate_approved", "escalate_approved"]
+
+
+def test_a_denied_first_read_gives_nothing_to_drill_down_on():
+    steps = [[call("get_all_hotels_in_city", "c1", city="Paris")],
+             [call("get_hotels_prices", "c2", hotel_names=["Good Night"])]]
+    pipeline, executor = build(steps, k=2, reviewer=MockReviewer("deny"))
+    run(pipeline, task=HOTEL_TASK)
+    assert outcomes(executor) == ["escalate_denied", "escalate_denied"]
+
+
+def test_drill_down_can_be_switched_off():
+    steps = [[call("get_all_hotels_in_city", "c1", city="Paris")],
+             [call("get_hotels_prices", "c2", hotel_names=["Good Night"])]]
+    pipeline, executor = build(steps, policy=ApprovalReusePolicy(drill_down=False), k=2)
+    run(pipeline, task=HOTEL_TASK)
+    assert outcomes(executor) == ["escalate_approved", "escalate_approved"]
+
+
+def test_similarity_comparison_does_not_drill_down():
+    steps = [[call("get_all_hotels_in_city", "c1", city="Paris")],
+             [call("get_hotels_prices", "c2", hotel_names=["Good Night"])]]
+    pipeline, executor = build(steps, policy=SimilarityReusePolicy(), k=2)
+    run(pipeline, task=HOTEL_TASK)
+    assert outcomes(executor) == ["escalate_approved", "escalate_approved"]
 
 
 def test_registered_and_zero_argument():
