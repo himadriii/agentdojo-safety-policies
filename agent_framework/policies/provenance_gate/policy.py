@@ -14,8 +14,10 @@ class ProvenancePolicy(Policy):
 
     name = "provenance"
 
-    def __init__(self, llm_enricher=None) -> None:
+    def __init__(self, llm_enricher=None, *, client_factory=None, model=None) -> None:
         self.llm_enricher = llm_enricher
+        self.client_factory = client_factory or make_groq_client
+        self.model = model
         self.client = None
 
     def evaluate(self, context: PolicyContext, state: dict):
@@ -25,8 +27,8 @@ class ProvenancePolicy(Policy):
             if self.llm_enricher:
                 evidence = self.llm_enricher(evidence)
             else:
-                self.client = self.client or make_groq_client()
-                evidence = enrich_with_llm(evidence, self.client)
+                self.client = self.client or self.client_factory()
+                evidence = enrich_with_llm(evidence, self.client, model=self.model)
         except Exception as error:
             info = {
                 "reason": (
