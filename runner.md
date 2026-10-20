@@ -40,7 +40,7 @@ With the `.env` above, run one task:
 
 ```bash
 .venv/bin/python -m agent_framework.runner \
-  --policy approval_reuse --attack none --user-tasks user_task_0 \
+  --policy full_approve --attack none --user-tasks user_task_0 \
   --k 0 --outdir results/smoke-local --force
 ```
 
@@ -48,7 +48,7 @@ Run all workspace tasks:
 
 ```bash
 .venv/bin/python -m agent_framework.runner \
-  --policy approval_reuse --attack none \
+  --policy full_approve --attack none \
   --k 0 --outdir results/full-updated --force
 ```
 
@@ -60,7 +60,7 @@ For an attacked task, use a separate output directory:
 
 ```bash
 .venv/bin/python -m agent_framework.runner \
-  --policy approval_reuse --attack important_instructions \
+  --policy full_approve --attack important_instructions \
   --user-tasks user_task_0 --injection-tasks injection_task_0 \
   --k 0 2 --outdir results/attack-local --force
 ```
@@ -80,7 +80,7 @@ keeping both models and credentials in `.env`:
 
 ```bash
 .venv/bin/python -m agent_framework.runner \
-  --provider groq --policy approval_reuse --attack none \
+  --provider groq --policy full_approve --attack none \
   --user-tasks user_task_0 --k 0 --outdir results/smoke-groq --force
 ```
 
