@@ -5,9 +5,7 @@ from .extractor import (
     extract_direct,
     flatten_arguments,
     make_groq_client,
-    normalize,
     scope_matches,
-    source_descends_from,
 )
 
 
@@ -76,6 +74,7 @@ def build_evidence_log(evidence: dict) -> dict:
     return {
         "tool_name": evidence.get("tool_name"),
         "arguments": evidence.get("arguments", {}),
+        "tool_effects": evidence.get("tool_effects", {}),
         "authorization_edges": [
             with_source(edge)
             for edge in edges
@@ -167,14 +166,12 @@ def _argument_confidence(evidence, authorizations, path, value):
         for edge in evidence["edges"]
         if edge["argument_path"] == path
         and edge["relation"] in {"provides_value", "derived_from"}
+        and edge.get("verified") is True
     ]
     scores = []
     for authorization in authorizations:
-        literal = normalize(str(value)) in normalize(authorization["supporting_span"])
         for edge in provenance:
-            derived = edge["relation"] == "derived_from" and source_descends_from(
-                evidence, edge["source_id"], authorization["source_id"]
-            )
-            if literal or derived:
-                scores.append(min(authorization["confidence"], edge["confidence"]))
+            # Authorization and value provenance are separate checks. Explicit
+            # cited dependencies replace chronological message ancestry.
+            scores.append(min(authorization["confidence"], edge["confidence"]))
     return max(scores, default=None)

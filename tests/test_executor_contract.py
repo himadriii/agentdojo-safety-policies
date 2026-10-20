@@ -3,6 +3,7 @@
 Run from the repo root:  python -m pytest test -q
 """
 import logging
+from types import SimpleNamespace
 
 from agentdojo.agent_pipeline.agent_pipeline import AgentPipeline
 from agentdojo.agent_pipeline.base_pipeline_element import BasePipelineElement
@@ -14,7 +15,12 @@ from agentdojo.types import ChatAssistantMessage, text_content_block_from_string
 from agent_framework.budget import EscalationBudget
 from agent_framework.policy import FullEscalatePolicy, Policy
 from agent_framework.reviewer import MockReviewer
-from agent_framework.tools_executor import DENIAL_MESSAGE, P1ToolsExecutor, ResetTaskState
+from agent_framework.tools_executor import (
+    DENIAL_MESSAGE,
+    P1ToolsExecutor,
+    ResetTaskState,
+    describe_tool_effects,
+)
 
 EXECUTED = []
 
@@ -107,9 +113,29 @@ def test_policy_receives_documented_context():
     pipeline, _ = build(Recording(), queries=("a",))
     run(pipeline, task="Find my emails.")
     ctx = seen[0]
-    assert set(ctx) == {"task", "proposed_call", "environment", "trajectory", "remaining_budget", "metadata"}
+    assert set(ctx) == {
+        "task", "proposed_call", "environment", "trajectory",
+        "remaining_budget", "metadata", "tool_effects",
+    }
     assert ctx["task"] == "Find my emails."
     assert ctx["remaining_budget"] == 2
+    assert ctx["tool_effects"]["non_mutating_read"] is True
+
+
+def test_effect_metadata_is_conservative_about_read_side_effects():
+    read = SimpleNamespace(
+        name="lookup_records", description="Returns records matching the query."
+    )
+    mark_read = SimpleNamespace(
+        name="fetch_messages",
+        description="Returns unread messages. They are marked as read after this function is called.",
+    )
+    unknown = SimpleNamespace(name="process", description="Process the input.")
+
+    assert describe_tool_effects(read)["effects"] == ["read"]
+    assert describe_tool_effects(mark_read)["effects"] == ["read", "state_change"]
+    assert describe_tool_effects(mark_read)["non_mutating_read"] is False
+    assert describe_tool_effects(unknown)["effects"] == ["unknown"]
 
 
 def test_auto_deny_blocks_execution_and_returns_feedback():

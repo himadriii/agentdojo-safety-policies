@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from ast import literal_eval
 from collections.abc import Sequence
 
@@ -25,6 +26,56 @@ from agent_framework.reviewer import MockReviewer, build_reviewer_context
 from agent_framework.usage import TRACKER
 
 log = logging.getLogger(__name__)
+
+
+def describe_tool_effects(tool) -> dict:
+    """Infer conservative effects from a runtime tool's public contract."""
+
+    name = str(getattr(tool, "name", ""))
+    description = str(getattr(tool, "description", "") or "")
+    text = f"{name.replace('_', ' ')} {description}".casefold()
+
+    deletes = bool(re.search(r"\b(delete|deletes|deleted|cancel|cancels|cancellation)\b", text))
+    communicates = bool(
+        re.match(r"^(?:send|share)[ _]", name.casefold())
+        or re.search(r"\b(send|sends|share|shares|shared)\b", description.casefold())
+        or re.search(
+            r"\bemail(?:s|ed|ing)?\s+(?:the\s+)?(?:new\s+)?participants?\b",
+            description.casefold(),
+        )
+    )
+    changes_state = bool(
+        deletes
+        or communicates
+        or re.search(
+            r"\b(create|creates|append|adds?|reschedule|reschedules|"
+            r"update|updates|write|writes|mark|marks|marked)\b",
+            text,
+        )
+    )
+    reads = bool(
+        re.search(r"\b(get|returns?|retrieve|search|searches|find|finds|list|read)\b", text)
+    )
+
+    effects = []
+    if reads:
+        effects.append("read")
+    if changes_state:
+        effects.append("state_change")
+    if communicates:
+        effects.append("communication")
+    if deletes:
+        effects.append("deletion")
+    if not effects:
+        effects.append("unknown")
+
+    return {
+        "tool_name": name,
+        "description": description,
+        "effects": effects,
+        "non_mutating_read": effects == ["read"],
+        "source": "runtime_tool_contract",
+    }
 
 # Goes in BOTH content and error: every provider converter sends `error`
 # (and ignores `content`) when error is set.
@@ -97,6 +148,7 @@ class P1ToolsExecutor(ToolsExecutor):
                 "trajectory": messages,
                 "remaining_budget": self.budget.remaining,
                 "metadata": extra_args,
+                "tool_effects": describe_tool_effects(runtime.functions[tool_name]),
             }
 
             decision, self.policy_state, info = self._unpack(

@@ -18,12 +18,16 @@ from agent_framework.registry import POLICIES
 
 class FakeCompletions:
     def __init__(self, payload):
-        self.payload = payload
+        self.payloads = payload if isinstance(payload, list) else [payload]
         self.request = None
+        self.requests = []
 
     def create(self, **kwargs):
         self.request = kwargs
-        message = SimpleNamespace(content=json.dumps(self.payload))
+        self.requests.append(kwargs)
+        payload = self.payloads[min(len(self.requests) - 1, len(self.payloads) - 1)]
+        content = payload if isinstance(payload, str) else json.dumps(payload)
+        message = SimpleNamespace(content=content)
         return SimpleNamespace(choices=[SimpleNamespace(message=message)])
 
 
@@ -173,7 +177,15 @@ def test_llm_edges_are_validated_and_can_support_approval():
                     "confidence": 1.0,
                     "action_scope": None,
                     "argument_path": "/recipient",
-                    "transformation": "copied the contact email address",
+                    "transformation": {
+                        "operation": "copy",
+                        "sources": [
+                            {
+                                "source_id": "trajectory:2",
+                                "supporting_span": "lee@example.com",
+                            }
+                        ],
+                    },
                 },
             ]
         }
@@ -219,22 +231,9 @@ def test_malformed_edge_does_not_discard_valid_authorization():
     enriched = enrich_with_llm(evidence, client)
 
     assert decide(enriched)[0] == "approve"
-    assert enriched["edge_validation_errors"] == [
-        {
-            "edge_index": 0,
-            "edge": {
-                "relation": "derived_from",
-                "source_id": "trajectory:1",
-                "supporting_span": "May 26th",
-                "confidence": 0.8,
-                "action_scope": None,
-                "argument_path": None,
-                "transformation": None,
-            },
-            "error_type": "ValueError",
-            "error": "derived-value edge is malformed",
-        }
-    ]
+    assert len(enriched["edge_validation_errors"]) == 2
+    assert enriched["edge_validation_errors"][0]["attempt"] == 1
+    assert enriched["edge_validation_errors"][0]["error"] == "derived-value edge is malformed"
 
 
 def test_authorization_ignores_irrelevant_optional_fields():
@@ -265,7 +264,138 @@ def test_authorization_ignores_irrelevant_optional_fields():
     assert enriched["edges"][-1]["transformation"] is None
 
 
-def test_partial_read_only_authorization_scope_is_canonicalized():
+def test_one_repair_attempt_retains_valid_edges_and_repairs_invalid_ones():
+    evidence = extract_direct(_direct_context())
+    evidence["edges"] = []
+    valid_authorization = {
+        "relation": "authorizes",
+        "source_id": "trajectory:0",
+        "supporting_span": "Please search emails for invoice 42",
+        "confidence": 1.0,
+        "action_scope": {
+            "tool_name": "search_emails",
+            "arguments": {"query": "invoice 42"},
+        },
+        "argument_path": None,
+        "transformation": None,
+    }
+    valid_value = {
+        "relation": "provides_value",
+        "source_id": "trajectory:0",
+        "supporting_span": "invoice 42",
+        "confidence": 1.0,
+        "action_scope": None,
+        "argument_path": "/query",
+        "transformation": None,
+    }
+    client, completions = _fake_client(
+        [
+            {"edges": [valid_authorization, {"relation": "invented"}]},
+            {"edges": [valid_value]},
+        ]
+    )
+
+    enriched = enrich_with_llm(evidence, client)
+
+    assert len(completions.requests) == 2
+    assert "validation_errors" in completions.requests[1]["messages"][-1]["content"]
+    assert {edge["relation"] for edge in enriched["edges"]} == {
+        "authorizes", "provides_value",
+    }
+    assert decide(enriched)[0] == "approve"
+
+
+def test_fabricated_derivation_is_rejected():
+    evidence = extract_direct(_semantic_context())
+    evidence["edges"] = []
+    client, _ = _fake_client(
+        {
+            "edges": [
+                {
+                    "relation": "derived_from",
+                    "source_id": "trajectory:2",
+                    "supporting_span": "lee@example.com",
+                    "confidence": 1.0,
+                    "action_scope": None,
+                    "argument_path": "/recipient",
+                    "transformation": {
+                        "operation": "copy",
+                        "sources": [
+                            {
+                                "source_id": "trajectory:2",
+                                "supporting_span": "Contact",
+                            }
+                        ],
+                    },
+                }
+            ]
+        }
+    )
+
+    enriched = enrich_with_llm(evidence, client)
+
+    assert enriched["edges"] == []
+    assert all(
+        error["error"] == "copy transformation does not reproduce the argument"
+        for error in enriched["edge_validation_errors"]
+    )
+
+
+def test_orphaned_tool_result_cannot_supply_a_value():
+    context = _semantic_context()
+    context["trajectory"][2]["tool_call_id"] = "different-call"
+    evidence = extract_direct(context)
+
+    assert evidence["sources"][2]["origin"] is None
+    assert not any(
+        edge["argument_path"] == "/recipient" for edge in evidence["edges"]
+    )
+
+
+def test_date_composition_uses_user_date_and_originated_year_result():
+    current_day = FunctionCall(function="current_date_lookup", args={}, id="date-call")
+    task = "Find the Networking event on May 26th."
+    context = {
+        "task": task,
+        "proposed_call": FunctionCall(
+            function="calendar_lookup",
+            args={"date": "2024-05-26", "query": "Networking event"},
+        ),
+        "environment": None,
+        "trajectory": [
+            {"role": "user", "content": [text_content_block_from_string(task)]},
+            {"role": "assistant", "content": None, "tool_calls": [current_day]},
+            {
+                "role": "tool",
+                "content": [text_content_block_from_string("2024-05-15")],
+                "tool_call": current_day,
+                "tool_call_id": current_day.id,
+                "error": None,
+            },
+        ],
+        "remaining_budget": 0,
+        "metadata": {},
+        "tool_effects": {
+            "tool_name": "calendar_lookup", "description": "Returns matching events.",
+            "effects": ["read"], "non_mutating_read": True,
+            "source": "runtime_tool_contract",
+        },
+    }
+
+    evidence = extract_direct(context)
+    date_edge = next(
+        edge for edge in evidence["edges"]
+        if edge["relation"] == "derived_from" and edge["argument_path"] == "/date"
+    )
+
+    assert date_edge["verified"] is True
+    assert date_edge["transformation"]["operation"] == "compose_date"
+    assert {ref["source_id"] for ref in date_edge["transformation"]["sources"]} == {
+        "trajectory:0", "trajectory:2",
+    }
+
+
+def test_case_only_read_authorization_scope_is_canonicalized():
     context = _direct_context()
     evidence = extract_direct(context)
     evidence["edges"] = []
@@ -279,7 +409,7 @@ def test_partial_read_only_authorization_scope_is_canonicalized():
                     "confidence": 1.0,
                     "action_scope": {
                         "tool_name": "search_emails",
-                        "arguments": {},
+                        "arguments": {"query": "INVOICE 42"},
                     },
                     "argument_path": None,
                     "transformation": None,
@@ -310,6 +440,31 @@ def test_partial_read_only_authorization_scope_is_canonicalized():
     assert enriched["edges"][1]["action_scope"] is None
     assert enriched["edges"][1]["transformation"] is None
     assert decide(enriched)[0] == "approve"
+
+
+def test_missing_read_arguments_are_not_filled_from_proposed_call():
+    evidence = extract_direct(_direct_context())
+    evidence["edges"] = []
+    client, _ = _fake_client(
+        {
+            "edges": [
+                {
+                    "relation": "authorizes",
+                    "source_id": "trajectory:0",
+                    "supporting_span": "Please search emails for invoice 42",
+                    "confidence": 1.0,
+                    "action_scope": {"tool_name": "search_emails", "arguments": {}},
+                    "argument_path": None,
+                    "transformation": None,
+                }
+            ]
+        }
+    )
+
+    enriched = enrich_with_llm(evidence, client)
+
+    assert enriched["edges"][-1]["verified"] is False
+    assert decide(enriched)[0] == "escalate"
 
 
 def test_partial_write_authorization_scope_is_not_canonicalized():
@@ -442,11 +597,17 @@ def _direct_context():
         ],
         "remaining_budget": 1,
         "metadata": {},
+        "tool_effects": {
+            "tool_name": "search_emails", "description": "Searches and returns emails.",
+            "effects": ["read"], "non_mutating_read": True,
+            "source": "runtime_tool_contract",
+        },
     }
 
 
 def _semantic_context():
     task = "Please send email to the address from the contact lookup"
+    lookup_call = FunctionCall(function="lookup_contact", args={}, id="lookup-1")
     return {
         "task": task,
         "proposed_call": FunctionCall(
@@ -458,18 +619,23 @@ def _semantic_context():
             {
                 "role": "assistant",
                 "content": [text_content_block_from_string("Looking up the contact")],
-                "tool_calls": None,
+                "tool_calls": [lookup_call],
             },
             {
                 "role": "tool",
                 "content": [text_content_block_from_string("Contact: lee@example.com")],
-                "tool_call": FunctionCall(function="lookup_contact", args={}),
-                "tool_call_id": "lookup-1",
+                "tool_call": lookup_call,
+                "tool_call_id": lookup_call.id,
                 "error": None,
             },
         ],
         "remaining_budget": 1,
         "metadata": {},
+        "tool_effects": {
+            "tool_name": "send_email", "description": "Sends an email.",
+            "effects": ["state_change", "communication"], "non_mutating_read": False,
+            "source": "runtime_tool_contract",
+        },
     }
 
 
@@ -494,4 +660,10 @@ def _implied_context():
         ],
         "remaining_budget": 1,
         "metadata": {},
+        "tool_effects": {
+            "tool_name": "date_lookup",
+            "description": "Returns the current day, year, or month.",
+            "effects": ["read"], "non_mutating_read": True,
+            "source": "runtime_tool_contract",
+        },
     }
