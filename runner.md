@@ -1,5 +1,11 @@
 # Running p2/anomaly-gate
 
+**P2 split guard:** final task IDs are awaiting team confirmation. For P2, use
+the development-only handoff in the README with `--provider lmstudio`; it selects
+the current calibrated candidate and real reviewer. Do not run the all-task or
+`user_task_0` examples below while the split is pending. These generic runner
+examples default to a mock reviewer unless `--reviewer llm` is supplied.
+
 This branch supports local LM Studio models and hosted inference through the same
 runner. Available policies: `full_approve`, `full_escalate`, `anomaly`. Reviewers: `mock`, `llm`.
 

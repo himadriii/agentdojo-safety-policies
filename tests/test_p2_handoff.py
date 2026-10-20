@@ -97,6 +97,8 @@ def test_handoff_cannot_silently_change_reviewer_provider(tmp_path, monkeypatch)
 
 def test_lmstudio_plans_are_separate_and_development_only(tmp_path):
     prepare(tmp_path / 'local', provider='lmstudio')
+    setup = json.loads((tmp_path / 'local/setup.json').read_text())
+    assert setup['candidate'].endswith('lmstudio-v2-category')
     for phase in ('development', 'calibration'):
         plan = json.loads((tmp_path / 'local' / phase / 'plan.json').read_text())
         assert plan['provider'] == 'lmstudio'

@@ -12,9 +12,11 @@ from p2_anomaly.reproduce import reproduce
 from p2_anomaly.splits import CALIBRATE
 
 DEFAULT_CANDIDATE = ROOT / 'p2_anomaly/artifacts/development/family-v3-category'
+LMSTUDIO_CANDIDATE = ROOT / 'p2_anomaly/artifacts/development/lmstudio-v2-category'
 
 
-def prepare(directory, candidate=DEFAULT_CANDIDATE, provider='groq'):
+def prepare(directory, candidate=None, provider='groq'):
+    candidate = candidate or (LMSTUDIO_CANDIDATE if provider == 'lmstudio' else DEFAULT_CANDIDATE)
     directory, candidate = Path(directory).resolve(), Path(candidate).resolve()
     if directory.exists():
         raise ValueError('Choose a new output directory; existing experiments must not be overwritten')
@@ -94,7 +96,7 @@ def main():
     prepare_parser = sub.add_parser('prepare')
     prepare_parser.add_argument('--out', type=Path, required=True)
     prepare_parser.add_argument('--provider', choices=['groq', 'lmstudio'], default='groq')
-    prepare_parser.add_argument('--candidate', type=Path, default=DEFAULT_CANDIDATE)
+    prepare_parser.add_argument('--candidate', type=Path)
     run_parser = sub.add_parser('run')
     run_parser.add_argument('--directory', type=Path, required=True)
     run_parser.add_argument('--phase', choices=['development', 'calibration'], default='development')
