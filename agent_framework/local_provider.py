@@ -70,9 +70,13 @@ def make_local_compatible(client):
     return client
 
 
-def make_local_llm(model: str) -> OpenAILLM:
+def make_local_client():
     client = openai.OpenAI(api_key=os.getenv("MLX_API_KEY", "mlx-local"), base_url=base_url(), max_retries=2)
-    make_local_compatible(client)
+    return make_local_compatible(client)
+
+
+def make_local_llm(model: str) -> OpenAILLM:
+    client = make_local_client()
     # Attacks look the model up by name inside pipeline.name (which has "/" replaced by "_").
     MODEL_NAMES.setdefault(model, "AI assistant")
     MODEL_NAMES.setdefault(model.replace("/", "_"), "AI assistant")

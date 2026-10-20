@@ -1,84 +1,9 @@
 """Approval reuse gate through the real P1ToolsExecutor pipeline (plan U2). No API key, no network."""
-from agentdojo.agent_pipeline.agent_pipeline import AgentPipeline
-from agentdojo.agent_pipeline.base_pipeline_element import BasePipelineElement
-from agentdojo.agent_pipeline.basic_elements import InitQuery, SystemMessage
-from agentdojo.agent_pipeline.tool_execution import ToolsExecutionLoop
-from agentdojo.functions_runtime import EmptyEnv, FunctionCall, FunctionsRuntime, make_function
-from agentdojo.types import ChatAssistantMessage, text_content_block_from_string
-
-from agent_framework.budget import EscalationBudget
 from agent_framework.policies.approval_reuse.policy import ApprovalReusePolicy
 from agent_framework.policy import Policy
 from agent_framework.registry import POLICIES
 from agent_framework.reviewer import MockReviewer, Reviewer
-from agent_framework.tools_executor import P1ToolsExecutor, ResetTaskState
-
-EXECUTED = []
-
-
-def search_emails(query: str) -> str:
-    """Search emails.
-
-    :param query: The search query.
-    """
-    EXECUTED.append(("search_emails", query))
-    return f"Found 1 email matching '{query}'"
-
-
-def send_email(recipients: list[str], body: str) -> str:
-    """Send an email.
-
-    :param recipients: The recipients.
-    :param body: The body.
-    """
-    EXECUTED.append(("send_email", tuple(recipients)))
-    return "sent"
-
-
-def flaky_tool(x: str) -> str:
-    """A tool that always fails.
-
-    :param x: Anything.
-    """
-    EXECUTED.append(("flaky_tool", x))
-    raise ValueError("backend down")
-
-
-class Steps(BasePipelineElement):
-    """Emits one assistant message per step; each step is a list of FunctionCalls."""
-
-    def __init__(self, steps):
-        self.steps = steps
-
-    def query(self, query, runtime, env=EmptyEnv(), messages=(), extra_args={}):
-        step = sum(1 for m in messages if m["role"] == "assistant")
-        calls = self.steps[step] if step < len(self.steps) else None
-        msg = ChatAssistantMessage(role="assistant", content=[text_content_block_from_string("ok")],
-                                   tool_calls=calls)
-        return query, runtime, env, [*messages, msg], extra_args
-
-
-def call(function, call_id=None, **args):
-    return FunctionCall(function=function, args=args, id=call_id)
-
-
-def build(steps, policy=None, k=2, reviewer=None):
-    EXECUTED.clear()
-    executor = P1ToolsExecutor(policy=policy or ApprovalReusePolicy(),
-                               reviewer=reviewer or MockReviewer(), budget=EscalationBudget(limit=k))
-    llm = Steps(steps)
-    pipeline = AgentPipeline([ResetTaskState(executor), SystemMessage("test agent"), InitQuery(),
-                              llm, ToolsExecutionLoop([executor, llm])])
-    return pipeline, executor
-
-
-def run(pipeline, task="Find my flight emails and email bob@example.com."):
-    runtime = FunctionsRuntime([make_function(f) for f in (search_emails, send_email, flaky_tool)])
-    pipeline.query(task, runtime, EmptyEnv(), [], {})
-
-
-def outcomes(executor):
-    return [d["outcome"] for d in executor.decisions]
+from tests.reuse_helpers import EXECUTED, build, call, outcomes, run
 
 
 def test_repeated_read_reuses_the_reviewer_approval():

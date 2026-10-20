@@ -47,13 +47,11 @@ def test_free_text_only_changes_are_covered_by_p6():
     assert free and all(r["approval_reuse"] for r in free)
 
 
-def test_cli_writes_outputs_and_fails_on_a_violation(tmp_path):
+def test_cli_writes_outputs_and_fails_on_a_violation(tmp_path, monkeypatch):
     assert probes.main(["--outdir", str(tmp_path)]) == 0
     assert (tmp_path / "probes.csv").exists()
     summary = json.loads((tmp_path / "summary.json").read_text())
     assert summary["approval_reuse"]["violations"] == 0
 
-    def always_covered(tool, new_args, approved_args, task):
-        return True
-
-    assert probes.main(["--outdir", str(tmp_path)], p6_predicate=always_covered) == 1
+    monkeypatch.setitem(probes.PREDICATES, "approval_reuse", lambda tool, new, approved, task: True)
+    assert probes.main(["--outdir", str(tmp_path)]) == 1

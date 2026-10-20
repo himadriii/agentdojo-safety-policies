@@ -49,39 +49,37 @@ class ApprovalReusePolicy(Policy):
         }
         try:
             decision, state["base"], info = _unpack(self.base.evaluate(context, state["base"]))
-            info = dict(info or {})
         except Exception as exc:
             return "escalate", state, {"reason": f"base policy failed ({type(exc).__name__}: {exc})"}
+        info = dict(info or {})
+        info["scores"] = {"reuse_approved": 0.0, "reuse_denied": 0.0, **(info.get("scores") or {})}
 
         try:
             self._resolve_pending(context["trajectory"], state)
             if decision == "escalate":
-                decision, info = self._reuse(context, state, info)
+                decision = self._reuse(context, state, info)
         except Exception as exc:  # reuse must never crash a task run
             info["reason"] = f"{info.get('reason') or 'base decision'}; reuse skipped ({type(exc).__name__})"
 
-        scores = dict(info.get("scores") or {})
-        scores.setdefault("reuse_approved", 0.0)
-        scores.setdefault("reuse_denied", 0.0)
-        scores["gate_ms"] = (time.perf_counter() - start) * 1000.0
-        info["scores"] = scores
+        info["scores"]["gate_ms"] = (time.perf_counter() - start) * 1000.0
         return decision, state, info
 
     def _reuse(self, context, state, info):
+        """Return the decision for an escalated call; updates `info` and `state` in place."""
         call = context["proposed_call"]
         args = dict(call.args)
         if self.remember_denials:
             for record in state["denied"]:
                 if record["function"] == call.function and matches_denial(call.function, args, record["args"]):
                     info["reason"] = f"repeats a call the reviewer denied earlier in this task: {_describe(record)}"
-                    info.setdefault("scores", {})["reuse_denied"] = 1.0
-                    return "deny", info
+                    info["scores"]["reuse_denied"] = 1.0
+                    return "deny"
         for record in state["approved"]:
             if record["function"] == call.function and self.covers(call.function, args, record["args"],
                                                                    context["task"]):
                 info["reason"] = f"covered by a reviewer approval earlier in this task: {_describe(record)}"
-                info.setdefault("scores", {})["reuse_approved"] = 1.0
-                return "approve", info
+                info["scores"]["reuse_approved"] = 1.0
+                return "approve"
         state["pending"].append({
             "id": call.id,
             "function": call.function,
@@ -90,33 +88,36 @@ class ApprovalReusePolicy(Policy):
             "index": len(context["trajectory"]),
         })
         info.setdefault("reason", "no earlier reviewer decision covers this call")
-        return "escalate", info
+        return "escalate"
 
     @staticmethod
-    def _resolve_pending(trajectory, state):
+    def _find_result(record, trajectory, used):
+        """Index of the tool result for an escalated call, searching only messages after it was escalated."""
+        for i in range(record["index"], len(trajectory)):
+            message = trajectory[i]
+            if i in used or message["role"] != "tool":
+                continue
+            if record["id"] is not None:
+                if message.get("tool_call_id") == record["id"]:
+                    return i
+                continue
+            tool_call = message.get("tool_call")
+            if tool_call is not None and tool_call.function == record["function"] and dict(tool_call.args) == record["args"]:
+                return i
+        return None
+
+    def _resolve_pending(self, trajectory, state):
         used = set()
         still_pending = []
         for record in state["pending"]:
-            result = None
-            for i in range(record["index"], len(trajectory)):
-                message = trajectory[i]
-                if i in used or message["role"] != "tool":
-                    continue
-                tool_call = message.get("tool_call")
-                if record["id"] is not None:
-                    hit = message.get("tool_call_id") == record["id"]
-                else:
-                    hit = (tool_call is not None and tool_call.function == record["function"]
-                           and dict(tool_call.args) == record["args"])
-                if hit:
-                    used.add(i)
-                    result = message
-                    break
-            if result is None:
+            i = self._find_result(record, trajectory, used)
+            if i is None:
                 still_pending.append(record)
-            elif record["budget"] <= 0:
+                continue
+            used.add(i)
+            if record["budget"] <= 0:
                 continue  # the runner denied it for budget; the reviewer never saw it
-            elif result.get("error") == DENIAL_MESSAGE:
+            if trajectory[i].get("error") == DENIAL_MESSAGE:
                 state["denied"].append(record)
             else:
                 state["approved"].append(record)

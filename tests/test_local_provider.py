@@ -1,4 +1,5 @@
 """Local MLX-Serve provider (plan U4). Fake clients only; no network."""
+import os
 from types import SimpleNamespace
 
 import httpx2
@@ -88,7 +89,6 @@ def test_build_pipeline_mlx_points_at_local_server_and_exports_model(monkeypatch
     llm = next(e for e in pipeline.elements if hasattr(e, "client"))
     assert str(llm.client.base_url).startswith("http://127.0.0.1:9999/v1")
     assert llm.model == "mlx-community/gemma"
-    import os
     assert os.environ["MLX_MODEL"] == "mlx-community/gemma"
 
 

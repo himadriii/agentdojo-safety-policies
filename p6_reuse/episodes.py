@@ -8,6 +8,7 @@ ideal reviewer and the metrics read them.
 import json
 import random
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 
 from agentdojo.functions_runtime import FunctionCall
@@ -34,8 +35,22 @@ class Episode:
     labels: dict = field(default_factory=dict)   # call id -> "user" | "injection"
 
 
+@lru_cache(maxsize=None)
+def _pristine_env(version, suite_name):
+    return get_suite(version, suite_name).load_and_inject_default_environment({})
+
+
+def fresh_env(suite_name, version=BENCHMARK_VERSION):
+    """An independent copy of the suite's default environment (loading YAML each time is ~50x slower)."""
+    return _pristine_env(version, suite_name).model_copy(deep=True)
+
+
 def _ids(prefix, numbers):
     return [f"{prefix}_{n}" for n in numbers]
+
+
+def _task_number(task_id):
+    return int(task_id.rsplit("_", 1)[1])
 
 
 def make_split(seed=0):
@@ -47,16 +62,12 @@ def make_split(seed=0):
         "travel": {},
     }}
     for name in ("slack", "travel"):
-        suite = get_suite(BENCHMARK_VERSION, name)
-        users = sorted(suite.user_tasks, key=lambda t: int(t.rsplit("_", 1)[1]))
-        split["suites"][name]["user_tasks"] = sorted(rng.sample(users, round(len(users) / 3)),
-                                                     key=lambda t: int(t.rsplit("_", 1)[1]))
+        users = sorted(get_suite(BENCHMARK_VERSION, name).user_tasks, key=_task_number)
+        split["suites"][name]["user_tasks"] = sorted(rng.sample(users, round(len(users) / 3)), key=_task_number)
     travel = get_suite(BENCHMARK_VERSION, "travel")
-    env = travel.load_and_inject_default_environment({})
-    with_gt = sorted((t for t, task in travel.injection_tasks.items() if task.ground_truth(env)),
-                     key=lambda t: int(t.rsplit("_", 1)[1]))
-    split["suites"]["travel"]["injection_tasks"] = sorted(rng.sample(with_gt, 2),
-                                                          key=lambda t: int(t.rsplit("_", 1)[1]))
+    env = fresh_env("travel")
+    with_gt = sorted((t for t, task in travel.injection_tasks.items() if task.ground_truth(env)), key=_task_number)
+    split["suites"]["travel"]["injection_tasks"] = sorted(rng.sample(with_gt, 2), key=_task_number)
     return split
 
 
@@ -85,22 +96,23 @@ def build_episodes(suites=("slack", "workspace", "travel"), split=None):
     """Return (episodes, skipped) where skipped lists (suite, injection_task) with no reference solution."""
     split = split or load_split()
     episodes, skipped = [], []
+    version = split.get("benchmark_version", BENCHMARK_VERSION)
     for name in suites:
-        suite = get_suite(split.get("benchmark_version", BENCHMARK_VERSION), name)
+        suite = get_suite(version, name)
         cfg = split["suites"][name]
         injections = []
         for inj_id in cfg["injection_tasks"]:
             task = suite.injection_tasks[inj_id]
             if name == "workspace":   # P3's hand-written sequences cover workspace tasks only
-                task = with_ground_truth(suite, task)
-            calls = task.ground_truth(suite.load_and_inject_default_environment({})) if task else []
+                task = with_ground_truth(suite, task, fresh_env(name, version))
+            calls = task.ground_truth(fresh_env(name, version)) if task else []
             if calls:
                 injections.append((inj_id, calls))
             else:
                 skipped.append((name, inj_id))
         for user_id in cfg["user_tasks"]:
             user = suite.user_tasks[user_id]
-            user_calls = user.ground_truth(suite.load_and_inject_default_environment({}))
+            user_calls = user.ground_truth(fresh_env(name, version))
             episodes.append(make_episode(name, user_id, user.PROMPT, user_calls))
             for inj_id, inj_calls in injections:
                 episodes.append(make_episode(name, user_id, user.PROMPT, user_calls, inj_id, inj_calls))

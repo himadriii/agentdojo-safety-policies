@@ -29,8 +29,9 @@ stage() {  # suite policy k attack
   [ "$attack" != none ] && extra=(--injection-tasks $(split "$suite" injection_tasks))
   log "START $suite $policy k=$k $attack"
   # shellcheck disable=SC2086
+  # ${extra[@]+...}: an empty array under `set -u` aborts on macOS's bash 3.2
   if "$PY" -W ignore -m agent_framework.runner --provider mlx --llm "$MODEL" --policy "$policy" \
-      --reviewer local_llm --suite "$suite" --attack "$attack" --user-tasks $users "${extra[@]}" \
+      --reviewer local_llm --suite "$suite" --attack "$attack" --user-tasks $users ${extra[@]+"${extra[@]}"} \
       --k "$k" --outdir "$OUT" >> "$OUT/log.txt" 2>&1; then
     log "DONE  $suite $policy k=$k $attack"
   else

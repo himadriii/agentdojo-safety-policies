@@ -9,7 +9,7 @@ import re
 from agent_framework.policies.approval_reuse.tool_table import spec_for
 
 _URL_RE = re.compile(r"(?:https?://|www\.)[^\s<>\"']+|\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b(?:/[^\s<>\"']*)?", re.I)
-_EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+_EMAIL_RE = re.compile(r"(?<![\w.+-])[\w.+-]+@[\w-]+(?:\.[\w-]+)+")  # anchored: no quadratic rescans
 _DIGITS_RE = re.compile(r"\b\d{5,}\b")
 _MIXED_RE = re.compile(r"\b(?=[a-z0-9]*[a-z])(?=[a-z0-9]*\d)[a-z0-9]{8,}\b", re.I)
 
@@ -39,16 +39,23 @@ def _amount_within(new, approved) -> bool:
         return False
 
 
-def _free_text(spec, args) -> str:
+def free_text_names(tool: str, args: dict) -> list[str]:
+    """Arguments that are neither key nor amount for `tool`, in argument order."""
+    spec = spec_for(tool)
     named = _key_names(spec, args) | spec.amount
-    return " ".join(str(v) for k, v in args.items() if k not in named and v is not None)
+    return [k for k in args if k not in named]
+
+
+def _free_text(tool, args) -> str:
+    return " ".join(str(args[k]) for k in free_text_names(tool, args) if args[k] is not None)
 
 
 def injected_tokens(text: str, known: str) -> list[str]:
     """Links, email addresses and code-like tokens in `text` that `known` never mentions."""
     known = known.casefold()
+    patterns = (_URL_RE, _EMAIL_RE, _DIGITS_RE, _MIXED_RE) if "@" in text else (_URL_RE, _DIGITS_RE, _MIXED_RE)
     found = []
-    for pattern in (_URL_RE, _EMAIL_RE, _DIGITS_RE, _MIXED_RE):
+    for pattern in patterns:
         found.extend(m.group(0) for m in pattern.finditer(text))
     return [t for t in found if t.casefold() not in known]
 
@@ -65,7 +72,7 @@ def covers_approval(tool: str, new_args: dict, approved_args: dict, task_text: s
         if not _amount_within(new_args.get(name), approved_args.get(name)):
             return False
     known = f"{task_text} {json.dumps(approved_args, default=str)}"
-    return not injected_tokens(_free_text(spec, new_args), known)
+    return not injected_tokens(_free_text(tool, new_args), known)
 
 
 def matches_denial(tool: str, new_args: dict, denied_args: dict) -> bool:

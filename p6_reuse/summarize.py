@@ -8,22 +8,15 @@ replay attack success that p6_reuse.replay reports.
 Run: python -m p6_reuse.summarize [--outdir results/p6_live]
 """
 import argparse
-import csv
 import json
 from pathlib import Path
+
+from agent_framework.runner import read_trace
+from p6_reuse.metrics import reuse_counts, write_csv
 
 COLUMNS = ["suite", "policy", "k", "attack", "n", "tcr", "utility", "live_attack_success", "reviews",
            "reviews_saved_approval", "reviews_saved_denial", "budget_exhausted_denials", "mean_gate_ms",
            "reviewer_unparseable", "policy_tokens", "tasks_with_errors"]
-
-
-def _trace(run_dir, suite, attack, row_key):
-    user_task, inj = row_key.split("|")
-    path = run_dir / suite / user_task / attack / f"{inj if inj != 'None' else 'none'}.json"
-    try:
-        return json.loads(path.read_text())
-    except FileNotFoundError:
-        return {}
 
 
 def summarize_run(summary_path: Path) -> dict:
@@ -32,7 +25,9 @@ def summarize_run(summary_path: Path) -> dict:
     rows = s["rows"]
     decisions, unparseable = [], 0
     for key in rows:
-        trace = _trace(run_dir, s["suite"], s["attack"], key)
+        user_task, inj = key.split("|")
+        trace = read_trace(run_dir.parent, run_dir.name, s["suite"], user_task, s["attack"],
+                           None if inj == "None" else inj)
         decisions.extend(trace.get("approval_decisions", []))
         unparseable += trace.get("reviewer_unparseable", 0)
     gate_ms = [d["scores"]["gate_ms"] for d in decisions if (d.get("scores") or {}).get("gate_ms") is not None]
@@ -45,11 +40,7 @@ def summarize_run(summary_path: Path) -> dict:
         "utility": sum(r["utility"] for r in rows.values()) / n,
         "live_attack_success": sum(r["attack_succeeded"] for r in rows.values()) / n if attacked else None,
         "reviews": s["hitl_load_all"],
-        "reviews_saved_approval": sum(d["outcome"] == "auto_approve" and (d.get("scores") or {}).get("reuse_approved") == 1.0
-                                      for d in decisions),
-        "reviews_saved_denial": sum(d["outcome"] == "auto_deny" and (d.get("scores") or {}).get("reuse_denied") == 1.0
-                                    for d in decisions),
-        "budget_exhausted_denials": sum(d["outcome"] == "budget_exhausted_deny" for d in decisions),
+        **reuse_counts(decisions),
         "mean_gate_ms": sum(gate_ms) / len(gate_ms) if gate_ms else None,
         "reviewer_unparseable": unparseable,
         "policy_tokens": policy_tokens.get("input_tokens", 0) + policy_tokens.get("output_tokens", 0),
@@ -86,10 +77,7 @@ def main(argv=None):
         print(f"no runner summaries under {args.outdir}")
         return 1
     out = Path(args.outdir)
-    with (out / "p6_summary.csv").open("w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=COLUMNS)
-        writer.writeheader()
-        writer.writerows(rows)
+    write_csv(out / "p6_summary.csv", rows, COLUMNS)
     (out / "p6_summary.md").write_text(to_markdown(rows))
     print(to_markdown(rows))
     print(f"saved {out / 'p6_summary.csv'} and {out / 'p6_summary.md'}")

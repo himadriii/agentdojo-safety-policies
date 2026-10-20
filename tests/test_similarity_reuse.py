@@ -2,7 +2,7 @@
 from agent_framework.policies.approval_reuse.similarity import SimilarityReusePolicy, similar_enough
 from agent_framework.registry import POLICIES
 from agent_framework.reviewer import MockReviewer
-from tests.test_approval_reuse_policy import build, call, outcomes, run
+from tests.reuse_helpers import build, call, outcomes, run
 
 TASK = "Send Alice the link to the team page."
 
