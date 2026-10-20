@@ -60,16 +60,16 @@ only with sufficient training-family support and familiar argument shapes.
 **Current status:** the original reference-only model is revoked after a task-family
 overlap audit. Two development candidates are saved under
 `p2_anomaly/artifacts/development/`. They use 54 audited live fitting calls plus 30
-clean references, and 24 separately calibrated live calls. Calibration escalations
-are 6/24 for strict coverage and 2/24 for guarded read-category transfer. These are
+clean references, and 28 separately calibrated live calls. Current `family-v3-*`
+calibration escalations are 7/28 for strict coverage and 2/28 for guarded read-category transfer. These are
 calibration diagnostics, not held-out benchmark gains. Neither candidate is frozen
 or promoted; `readiness.json` records the blocker and resume command. The runner
 refuses missing/revoked anomaly artifacts. Runtime scoring failures still escalate.
 
 Live anomaly-controlled episodes and live attack evaluations completed: **zero**.
 The latest collection stopped at a Groq HTTP 429 after two completed episodes.
-Four additional inspected calibration calls are saved locally (28 available total),
-but are not yet incorporated in the saved candidates. The next run prioritizes
+Four additional inspected calibration calls are incorporated in the portable v3 candidates;
+one comes from a quota-interrupted episode and does not establish task completion. The next run prioritizes
 the actual gate and real reviewer on development tasks, followed by matched baselines.
 
 `p2_anomaly/splits.py` is the canonical split: 13 fit / 8 calibration / 12 common
@@ -81,7 +81,7 @@ independent observations. Earlier v1 calibration figures are superseded.
 Reproduce the saved model scores and threshold without API access:
 
 ```bash
-python -m p2_anomaly.reproduce p2_anomaly/artifacts/development/family-v2-category
+python -m p2_anomaly.reproduce p2_anomaly/artifacts/development/family-v3-category
 python -m pytest tests -q
 ```
 
@@ -137,6 +137,87 @@ matrix contains 972 episodes, plus possible auxiliary benchmark runs; budget it 
 comparisons, uncertainty, review load and response token usage including auxiliary runs.
 Missing runs and API errors are never presented as successful safety evaluations.
 The 30-call live-calibration floor is a project readiness guard, not production certification.
+
+### Run the P2 handoff on another machine
+
+The course evaluation is the current target. No API calls are needed for setup,
+tests, model reproduction, plan creation, or result packaging. Use Python 3.14
+(the tested version), check out `p2/anomaly-gate`, and create a virtual environment.
+On macOS/Linux:
+
+```bash
+git clone --branch p2/anomaly-gate https://github.com/himadriii/agentdojo-safety-policies.git
+cd agentdojo-safety-policies
+python3.14 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r p2_anomaly/artifacts/development/environment-lock.txt
+python -m pip check
+python -m pytest tests -q
+python -m p2_anomaly.handoff prepare --out results/p2-teammate
+```
+
+If the repository is already cloned, switch to `p2/anomaly-gate` and pull instead.
+On Windows activate the environment with `.venv\Scripts\Activate.ps1` in PowerShell.
+Create a local `.env` in the repository root containing `GROQ_API_KEY=your-own-key`.
+Never send or commit this file. A new key in the same Groq organization shares
+the organization's rate limits; do not rotate keys to retry a quota failure.
+
+Run one development episode first to check connectivity and integration. These
+are real evaluations, not mock/demo runs. Then resume the same plan:
+
+```bash
+python -m p2_anomaly.handoff run --directory results/p2-teammate --phase development --max-jobs 1
+python -m p2_anomaly.handoff run --directory results/p2-teammate --phase development --max-jobs 12
+```
+
+This runs 12 development episodes: two fit-partition user tasks, clean and
+`important_instructions` attack conditions, three policies, and k=2. The anomaly
+gate runs first in each matched triplet. All escalations use the real LLM reviewer.
+The default candidate is explicitly `family-v3-category`; it is not frozen.
+Stochastic single runs and two tasks cannot establish a general benchmark gain.
+Do not change source, model, dependencies, or plan while resuming an experiment.
+
+If development finishes without a quota stop, collect additional clean calibration
+trajectories (eight planned episodes, never final-test tasks):
+
+```bash
+python -m p2_anomaly.handoff run --directory results/p2-teammate --phase calibration --max-jobs 8
+```
+
+HTTP 429 stops the current batch. If it occurs, stop all live commands, including
+the other phase. Only use `--resume-after-quota` after the provider limit resets.
+No paid fallback is configured. Full collection/review/evaluation can exceed a
+free-tier allowance; the commands promise resumability, not completion in one quota window.
+
+Package whatever completed, even if quota interrupted the run:
+
+```bash
+python -m p2_anomaly.handoff bundle --directory results/p2-teammate --out results/p2-teammate-return.zip
+```
+
+Send that ZIP to P2 within the project team. It includes benchmark traces,
+ledgers, source snapshots and summaries, excluding `.env` and unrelated files.
+Do not manually delete failed episodes or report incomplete plans as successes.
+P2 will inspect new clean calls, extend the numeric dataset, retrain/recalibrate,
+and freeze the candidate before issuing the held-out plan. Final held-out tasks
+and reserved attack settings remain untouched by this handoff. The full final
+matrix is 972 episodes. A predeclared `--profile course` final plan provides
+108 episodes: all 12 held-out user tasks, clean plus both reserved attack styles,
+three policies, and k=2. Each task receives one reserved injection assigned by a
+fixed rotation (2/7/9/10), shared across policies. It does not claim full-matrix
+coverage, multiple-budget results, or repeated-run reliability. After audit,
+recalibration and freeze, P2 can issue that plan with:
+
+```bash
+python -m p2_anomaly.experiments plan --stage final --profile course \
+    --frozen p2_anomaly/artifacts/frozen/course-v1 --out results/p2-final/plan.json
+python -m p2_anomaly.experiments run --plan results/p2-final/plan.json --max-jobs 3
+python -m p2_anomaly.experiments summarize --plan results/p2-final/plan.json
+```
+
+The freeze directory does not exist yet; these commands are for the next stage,
+not part of the initial teammate handoff. Final evidence remains necessary before
+claiming improvements; there is no guaranteed AgentDojo score or pass threshold.
 
 ## Adding a policy
 

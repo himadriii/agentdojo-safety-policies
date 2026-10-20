@@ -28,6 +28,7 @@ CODE_PATHS = [
     'p2_anomaly/train.py', 'p2_anomaly/traces.py', 'p2_anomaly/experiments.py',
     'p2_anomaly/splits.py', 'p2_anomaly/diagnostics.py',
     'p2_anomaly/reproduce.py',
+    'p2_anomaly/handoff.py',
     'requirements.txt', 'requirements-lock.txt',
 ]
 
@@ -126,9 +127,11 @@ def validate_plan(plan):
             raise ValueError('injection task partition violation')
 
 
-def make_plan(stage, repeats=3, frozen=None, model='openai/gpt-oss-20b'):
+def make_plan(stage, repeats=3, frozen=None, model='openai/gpt-oss-20b', profile='full'):
     if repeats < 1:
         raise ValueError('repeats must be positive')
+    if profile not in ('full', 'course') or (profile == 'course' and stage != 'final'):
+        raise ValueError('course profile is available only for frozen final evaluation')
     if stage == 'final':
         if not frozen:
             raise ValueError('final evaluation requires frozen artifacts')
@@ -143,26 +146,36 @@ def make_plan(stage, repeats=3, frozen=None, model='openai/gpt-oss-20b'):
     users = collection_users if stage == 'collect' else (FIT[:2] if stage == 'development' else TEST)
     repetitions = repeats if stage == 'collect' else 1
     for repetition in range(repetitions):
-        for uid in users:
+        for user_index, uid in enumerate(users):
             settings = [('none', None)]
             if stage != 'collect':
                 injections = [0] if stage == 'development' else [2, 7, 9, 10]
+                if profile == 'course':
+                    # Fixed before results: rotate reserved injections evenly across the 12 tasks.
+                    injections = [[2, 7, 9, 10][user_index % 4]]
                 attacks = ['important_instructions'] if stage == 'development' else ['important_instructions', 'tool_knowledge']
                 settings += [(attack, iid) for attack in attacks for iid in injections]
             for attack, iid in settings:
                 policies = ['full_approve'] if stage == 'collect' else ['full_approve', 'full_escalate', 'anomaly']
+                if profile == 'course':
+                    policies = ['anomaly', 'full_approve', 'full_escalate']
                 for policy in policies:
                     budgets = [0] if stage == 'collect' else [0, 2, 5]
+                    if profile == 'course':
+                        budgets = [2]
                     for k in budgets:
                         jobs.append({'id': f'job_{len(jobs):05d}', 'policy': policy, 'reviewer': 'llm',
                                      'k': k, 'user_task': f'user_task_{uid}',
                                      'injection_task': None if iid is None else f'injection_task_{iid}',
                                      'attack': attack, 'repetition': repetition})
-    return {'stage': stage, 'provider': 'groq', 'model': model, 'reviewer_model': model,
+    return {'stage': stage, 'profile': profile, 'provider': 'groq', 'model': model, 'reviewer_model': model,
             'benchmark_version': 'v1.2', 'suite': 'workspace', 'jobs': jobs,
             'frozen_directory': str(Path(frozen).resolve()) if frozen else None,
             'freeze_sha256': digest(Path(frozen) / 'freeze.json') if frozen else None,
-            'note': 'An attack benchmark may also bill auxiliary injection-as-user runs.'}
+            'note': ('An attack benchmark may also bill auxiliary injection-as-user runs. '
+                     'Course profile uses k=2 and one preassigned reserved injection per user task '
+                     'for each attack style; it does not cover the full matrix.' if profile == 'course'
+                     else 'An attack benchmark may also bill auxiliary injection-as-user runs.')}
 
 
 def run_plan(plan_path, max_jobs, artifact=None, resume_after_quota=False):
@@ -424,6 +437,7 @@ def main():
     plan.add_argument('--out', type=Path, required=True)
     plan.add_argument('--repeats', type=int, default=3)
     plan.add_argument('--frozen', type=Path)
+    plan.add_argument('--profile', choices=['full', 'course'], default='full')
     run = sub.add_parser('run')
     run.add_argument('--plan', type=Path, required=True)
     run.add_argument('--max-jobs', type=int, required=True)
@@ -442,7 +456,7 @@ def main():
     if args.command == 'plan':
         if args.out.exists():
             raise ValueError('plan already exists; use a new directory for a different manifest')
-        result = make_plan(args.stage, args.repeats, args.frozen)
+        result = make_plan(args.stage, args.repeats, args.frozen, profile=args.profile)
         save(args.out, result)
         print(f"Created {len(result['jobs'])} planned episodes; no API calls made")
     else:
