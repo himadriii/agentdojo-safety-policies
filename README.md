@@ -9,6 +9,8 @@ A group project (AI6101) to implement and evaluate safety approval policies for 
 - Per-call decision logging and per-component token counts, written into AgentDojo's trace JSON
 - Baseline policies (`full_approve`, `full_escalate`) and automated tests
 
+For local and hosted inference commands with `.env` configuration, see [runner.md](runner.md).
+
 ## Setup
 
 ```bash
