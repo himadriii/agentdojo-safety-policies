@@ -108,12 +108,13 @@ def test_explicit_reviewer_model_reaches_executor(monkeypatch):
     from tests.test_executor_contract import ScriptedLLM
     from agent_framework.reviewer import MockReviewer
     reviewers = []
-    def factory(model):
+    def factory(model, client):
         r = MockReviewer()
         r.model = model
         reviewers.append(r)
         return r
     monkeypatch.setattr(runner, 'make_groq_llm', lambda _: ScriptedLLM(['x']))
+    monkeypatch.setattr(runner, 'make_inference_client', lambda *args, **kwargs: object())
     monkeypatch.setitem(runner.REVIEWERS, 'llm', factory)
     pipeline = runner.build_pipeline('agent', 'full_escalate', 'llm', 2, 'groq', 'explicit-reviewer')
     assert len(reviewers) == 1

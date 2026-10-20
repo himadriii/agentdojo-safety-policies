@@ -1,12 +1,12 @@
 import argparse
+import hashlib
+import os
 import json
 import logging
 from pathlib import Path
 
-from dotenv import load_dotenv
-
 from agentdojo.logging import OutputLogger
-from agentdojo.agent_pipeline.agent_pipeline import AgentPipeline, get_llm, load_system_message
+from agentdojo.agent_pipeline.agent_pipeline import AgentPipeline, load_system_message
 from agentdojo.agent_pipeline.basic_elements import InitQuery, SystemMessage
 from agentdojo.agent_pipeline.llms.openai_llm import OpenAILLM
 from agentdojo.agent_pipeline.tool_execution import ToolsExecutionLoop
@@ -15,7 +15,6 @@ from agentdojo.benchmark import (
     benchmark_suite_with_injections,
     benchmark_suite_without_injections,
 )
-from agentdojo.models import MODEL_PROVIDERS, ModelsEnum
 from agentdojo.task_suite.load_suites import get_suite
 
 from agent_framework.budget import EscalationBudget
@@ -26,24 +25,38 @@ from agent_framework.usage import track_openai_client
 
 from agent_framework.llm_providers import make_groq_llm
 from agent_framework.registry import POLICIES, REVIEWERS
-from agent_framework.llm_reviewer import REVIEWER_PROMPT_VERSION
+from agent_framework.llm_reviewer import REVIEWER_PROMPT_VERSION, REVIEWER_SCHEMA
+from agent_framework.inference import (
+    PROVIDERS, component_settings, make_inference_client, make_inference_llm,
+)
+from agent_framework.runner_config import load_runner_env, validate_inference_args
 
 
 def build_pipeline(llm_name, policy_name, reviewer_name, k, provider="openai", reviewer_model=None):
+    if not llm_name or not llm_name.strip():
+        raise ValueError("llm_name must not be blank")
     if provider == "groq":
         llm = make_groq_llm(llm_name)
     else:
-        llm = get_llm(MODEL_PROVIDERS[ModelsEnum(llm_name)], llm_name, None, "tool")
+        llm = make_inference_llm(provider, llm_name)
     if isinstance(llm, OpenAILLM):
         track_openai_client(llm.client, "agent")
     else:
         logging.warning("Agent token usage is only tracked for OpenAI-compatible providers.")
 
+    inference_config = {"agent": {"provider": provider, "model": llm_name}}
     policy = POLICIES[policy_name]()
     if policy_name == 'anomaly' and policy.artifact is None:
         raise RuntimeError('Anomaly model unavailable or revoked. Set P2_ANOMALY_MODEL to a validated artifact.')
     if reviewer_name == "llm":
-        reviewer = REVIEWERS[reviewer_name](model=reviewer_model or llm_name)
+        reviewer_provider, reviewer_model = component_settings(
+            "REVIEWER", provider, llm_name, reviewer_model
+        )
+        reviewer = REVIEWERS[reviewer_name](
+            model=reviewer_model,
+            client=make_inference_client(reviewer_provider, response_schema=REVIEWER_SCHEMA),
+        )
+        inference_config["reviewer"] = {"provider": reviewer_provider, "model": reviewer_model}
         reviewer_tag = f"llm-{REVIEWER_PROMPT_VERSION}-{reviewer.model}"
     else:
         reviewer = REVIEWERS[reviewer_name]()
@@ -60,10 +73,12 @@ def build_pipeline(llm_name, policy_name, reviewer_name, k, provider="openai", r
         llm,
         ToolsExecutionLoop([executor, llm]),
     ])
-    # Unique per config (results are cached per pipeline name); "/" breaks AgentDojo's cache lookup.
+    # Retain P2 artifact and reviewer identities while separating inference routes.
+    pipeline.inference_config = inference_config
+    config_key = hashlib.sha256(json.dumps(inference_config, sort_keys=True).encode()).hexdigest()[:10]
     artifact_tag = getattr(policy, 'artifact_hash', None)
     policy_tag = f"{policy_name}-{artifact_tag[:12]}" if artifact_tag else policy_name
-    pipeline.name = f"{llm_name}-{policy_tag}-{reviewer_tag}-k{k}".replace("/", "_")
+    pipeline.name = f"{provider}-{llm_name}-{policy_tag}-{reviewer_tag}-k{k}-{config_key}".replace("/", "_")
     return pipeline
 
 
@@ -130,6 +145,7 @@ def run_one(args, k):
 
     n = max(len(rows), 1)
     summary = {
+        "provider": args.provider, "inference": pipeline.inference_config,
         "policy": args.policy, "reviewer": args.reviewer, "llm": args.llm, "k": k,
         "suite": suite.name, "attack": attack_name, "n": len(rows),
         "tcr": sum(r["completed_safely"] for r in rows.values()) / n,
@@ -138,7 +154,7 @@ def run_one(args, k):
         "tasks_with_errors": sum(r["error"] is not None for r in rows.values()),
         "token_usage": tokens,   # excludes the injection-task-as-user-task baseline runs
         "rows": rows,
-        "reviewer_model": getattr(args, 'reviewer_model', None) or args.llm if args.reviewer == 'llm' else None,
+        "reviewer_model": pipeline.inference_config.get("reviewer", {}).get("model"),
         "benchmark_version": args.benchmark_version,
         "pipeline_name": pipeline.name,
     }
@@ -151,13 +167,14 @@ def run_one(args, k):
 
 
 def main():
-    load_dotenv()
+    env_file = load_runner_env()
     logging.basicConfig(level=logging.INFO)
     p = argparse.ArgumentParser()
+    p.add_argument("--env-file", type=Path, default=env_file, help="Configuration file (default: repository .env)")
     p.add_argument("--policy", required=True, choices=sorted(POLICIES))
     p.add_argument("--reviewer", default="mock", choices=sorted(REVIEWERS))
-    p.add_argument("--llm", required=True)#, choices=[m.value for m in ModelsEnum])
-    p.add_argument("--provider", default="openai", choices=["openai", "groq"])
+    p.add_argument("--llm", default=None, help="Model ID; defaults to the selected provider model in .env")
+    p.add_argument("--provider", default=os.getenv("LLM_PROVIDER") or "openai", choices=PROVIDERS)
     p.add_argument("--reviewer-model", default=None)
     p.add_argument("--suite", default="workspace")
     p.add_argument("--benchmark-version", default="v1.2")
@@ -168,6 +185,7 @@ def main():
     p.add_argument("--outdir", default="results")
     p.add_argument("--force", action="store_true")
     args = p.parse_args()
+    validate_inference_args(p, args)
     for k in args.k:
         run_one(args, k)
 
