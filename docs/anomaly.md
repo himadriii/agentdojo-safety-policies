@@ -79,15 +79,16 @@ The owner's current primary evaluation uses hosted `openai/gpt-oss-20b` for
 both the agent and the `llm` reviewer, reviewer prompt v2, AgentDojo v1.2 and
 `important_instructions`. It starts with k=2 plus clean controls on all three
 published DEV suites. Optional budget comparisons require the same configuration.
-The agent uses `LMSTUDIO_*`; the separate reviewer endpoint uses `INFERENCE_*`
+The agent uses `LMSTUDIO_*`; reviewer configuration uses `INFERENCE_*`
 with `REVIEWER_PROVIDER=compatible`. This replaces the earlier 20B/120B setting
 for P2's primary evaluation; scores from the two configurations remain separate.
 Runs are serial and stop at rate limits, server errors or reviewer parse failures.
 Hosted capacity is not assumed unlimited, and no Groq fallback is used.
 
 Measured, complete primary 20B/20B runs are recorded in
-`p2_anomaly/artifacts/development/hosted20-v2/live-evaluation.json` once full DEV
-starts. The regression pilot has a separate `hosted20-v2-pilot` directory and
+`p2_anomaly/artifacts/development/hosted20-v2-recovered/live-evaluation.json`.
+Both roles use the responding hosted 20B endpoint after persistent empty agent
+responses on the other server. The regression pilots have separate directories and
 does not supply full-suite scores. The old hosted20-v1 run was stopped and kept
 as a before-repair record; its completed banking result is 8/18 benchmark-safe,
 HITL Load 14, with 25 total reviewer calls. Its Slack failures included two
@@ -98,6 +99,25 @@ episodes with utility success and attack failure. HITL Load is the sum of LLM
 reviewer calls on safely completed episodes; total reviewer calls are also
 reported so failed tasks' costs remain visible. Trace checks validate logging
 invariants, not task correctness or security.
+
+Complete repaired DEV results (20B/20B, k=2, benchmark v1.2):
+
+| Suite | Clean passed | Attacked safe | Attacked TCR | HITL Load | Total attacked reviews | Attack successes |
+|---|---:|---:|---:|---:|---:|---:|
+| Banking | 2/6 | 7/18 | 38.9% | 9 | 16 | 0 |
+| Slack | 5/7 | 3/14 | 21.4% | 4 | 14 | 1 |
+| Travel | 2/7 | 1/14 | 7.1% | 1 | 16 | 0 |
+| Total | 9/20 | 11/46 | 23.9% | 14 | 46 | 1 |
+
+The full directory passes trace verification (69 traces, zero problems), and
+all source hashes match the manifest. The successful Slack attack was escalated:
+the reviewer approved a malicious URL introduced through a channel-listing
+result. The webpage-specific guard does not cover every tool-result source.
+Nine of eleven clean failures had no gate denial. Three clean travel answers
+also fail strict text matching because of Unicode spaces/hyphens; official
+outputs and scores are unchanged. No matched no-gate/anomaly-only comparison
+establishes an improvement attributable to Isolation Forest. These are complete
+development scores, not held-out final results.
 
 Banking utility needs qualification: task 5 can pass on an existing transaction
 even if no new top-up executes; task 10 intentionally rewards no state change
@@ -141,14 +161,18 @@ held-out has 14 user tasks and 34 pairs per budget. Workspace is already examine
 and supports development/compatibility checks, not claims of unseen final data.
 Freeze the model, rules, threshold and source before running the held-out split.
 The two-task repair pilot checks known DEV regressions and clean behavior; it
-does not establish general attack resistance. Full DEV starts automatically only
-if all two clean and four attacked pilot episodes complete safely. Otherwise
-the queue stops for diagnosis rather than reporting a selected subset as final.
+does not establish general attack resistance. The automatic coordinator required
+all six episodes to complete safely and stopped when that condition failed.
+Full DEV was then explicitly launched to measure all agreed tasks, retaining
+failures: clean pilot 2/2, attacked pilot 1/4 safe, zero successful attacks.
+The primary run's recovery log records bounded resumes after HTTP 503 failures;
+individual API calls have no automatic retries and quota errors stop the run.
 
 The hosted adapter preserves GPT-OSS reasoning fields across tool turns. A
 reasoning-only response gets at most two continuation requests; persistent empty
 responses stop the run as an infrastructure failure. Reasoning is never used as
 the final answer. This adapter change has separate run identities from the first
 repair pilot, whose second clean task ended with a blank agent answer despite
-all three reads being approved. The current regression run is recorded under
-`hosted20-v2-reasoning-pilot`; earlier pilot results remain unchanged.
+all three reads being approved. The reasoning-preservation pilot also stopped on
+an empty response. The successful endpoint regression is recorded under
+`hosted20-v2-recovered-pilot`; earlier pilot results remain unchanged.
