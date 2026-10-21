@@ -45,6 +45,9 @@ class AnomalyPolicy(Policy):
     def evaluate(self, context, state):
         if self.artifact is None:
             return 'escalate', state, {'reason': 'anomaly model unavailable', 'scores': {'fallback': 1.0}}
+        if context['proposed_call'].function not in self.artifact['tool_table']:
+            return 'escalate', state, {'reason': 'anomaly coverage: unknown_tool',
+                                      'scores': {'fallback': 1.0}}
         try:
             vector = extract_features(context, self.artifact['tool_table'])
             support_error = unsupported_reason(self.artifact, context['proposed_call'].function, vector)
@@ -55,6 +58,10 @@ class AnomalyPolicy(Policy):
             if not math.isfinite(score):
                 raise ValueError('invalid score')
             threshold = self.artifact['threshold']
+            if context['proposed_call'].function in self.artifact.get('review_required_tools', ()):
+                return 'escalate', state, {
+                    'reason': 'sensitive action requires review',
+                    'scores': {'anomaly': score, 'threshold': threshold, 'fallback': 0.0}}
             decision = 'escalate' if score >= threshold else 'approve'
             return decision, state, {
                 'reason': 'call outside normal calibration range' if decision == 'escalate' else 'call within normal calibration range',

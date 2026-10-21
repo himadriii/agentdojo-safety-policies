@@ -15,7 +15,12 @@ def main():
     parser.add_argument('--artifact', type=Path, required=True)
     parser.add_argument('--outdir', type=Path, required=True)
     parser.add_argument('--resume-after-quota', action='store_true')
+    parser.add_argument('--k', type=int, choices=[0, 2, 5], default=2)
+    parser.add_argument('--suite', choices=['banking', 'slack', 'travel'])
+    parser.add_argument('--attack', choices=['none', 'important_instructions'], default='important_instructions')
     options = parser.parse_args()
+    if options.stage == 'compat' and (options.k != 2 or options.suite or options.attack != 'important_instructions'):
+        parser.error('Compatibility settings are fixed by the team')
     load_dotenv()
     from agent_framework.policies.anomaly import AnomalyPolicy
     from agent_framework.runner import run_one
@@ -31,7 +36,7 @@ def main():
     options.outdir.mkdir(parents=True, exist_ok=True)
     identity = {'stage': options.stage, 'artifact_sha256': hashlib.sha256(artifact.read_bytes()).hexdigest(),
                 'agent': 'openai/gpt-oss-20b', 'reviewer': 'openai/gpt-oss-120b',
-                'benchmark': 'v1.2', 'attack': 'important_instructions', 'k': 2}
+                'benchmark': 'v1.2', 'attack': options.attack, 'k': options.k, 'suite': options.suite}
     from p2_anomaly.experiments import CODE_PATHS, digest
     identity['source_sha256'] = {name: digest(name) for name in [*CODE_PATHS, 'p2_anomaly/shared_run.py']}
     if options.stage == 'dev':
@@ -42,9 +47,12 @@ def main():
         parser.error('Run configuration changed; choose a new output directory')
     identity_file.write_text(json.dumps(identity, indent=2) + '\n')
     marker = options.outdir / 'quota-stop.json'
-    if marker.exists() and not options.resume_after_quota:
+    global_marker = Path('results/p2-provider-quota-stop.json')
+    if (marker.exists() or global_marker.exists()) and not options.resume_after_quota:
         parser.error('Quota stop retained; use --resume-after-quota after reset')
     suites = ['workspace'] if options.stage == 'compat' else ['banking', 'slack', 'travel']
+    if options.suite:
+        suites = [options.suite]
     try:
         with quota_safe_shared_runner():
             for suite in suites:
@@ -63,14 +71,17 @@ def main():
                 exposure_path.write_text(json.dumps(exposure, indent=2, sort_keys=True) + '\n')
                 args = SimpleNamespace(provider='groq', llm='openai/gpt-oss-20b',
                     reviewer='llm', reviewer_model='openai/gpt-oss-120b', policy='anomaly',
-                    benchmark_version='v1.2', suite=suite, attack='important_instructions',
+                    benchmark_version='v1.2', suite=suite, attack=options.attack,
                     user_tasks=users, injection_tasks=injections, split_file=split_file,
                     split='dev', outdir=str(options.outdir), force=False)
-                run_one(args, 2)
+                run_one(args, options.k)
     except QuotaStop:
         marker.write_text(json.dumps({'status': 'quota_stop', 'suite': suite}) + '\n')
+        global_marker.write_text(json.dumps({'status': 'quota_stop', 'suite': suite}) + '\n')
         print('Quota reached. Stopped; completed traces remain cached.', flush=True)
         return 2
+    if options.resume_after_quota:
+        global_marker.unlink(missing_ok=True)
     return 0
 
 

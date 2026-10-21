@@ -12,8 +12,22 @@ from p2_anomaly.experiments import (
 
 
 @pytest.fixture(autouse=True)
-def declared_test_route(monkeypatch):
+def declared_test_route(monkeypatch, tmp_path):
+    import p2_anomaly.experiments as experiments
+    # Mock inference tests must never read or overwrite the real provider's quota state.
+    monkeypatch.setattr(experiments, 'QUOTA_MARKER', tmp_path / 'provider-quota.json')
     monkeypatch.setenv('REVIEWER_PROVIDER', 'groq')
+
+
+def test_global_quota_stop_blocks_a_fresh_plan(tmp_path, monkeypatch):
+    import p2_anomaly.experiments as experiments
+    monkeypatch.setattr(experiments, 'load_dotenv', lambda *_: None)
+    monkeypatch.setenv('GROQ_API_KEY', 'unit-test-not-a-real-key')
+    experiments.QUOTA_MARKER.write_text('{}')
+    path = tmp_path / 'fresh-plan.json'
+    save(path, make_plan('collect', 1))
+    with pytest.raises(ValueError, match='Provider quota stop retained'):
+        experiments.run_plan(path, 1)
 
 
 def test_collection_is_only_development_and_real_reviewer():

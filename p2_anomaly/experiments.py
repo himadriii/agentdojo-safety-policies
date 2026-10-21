@@ -20,6 +20,7 @@ from p2_anomaly.train import FIT, CALIBRATE, TEST
 from p2_anomaly.diagnostics import clustered_flag_interval
 
 ROOT = Path(__file__).resolve().parents[1]
+QUOTA_MARKER = ROOT / 'results/p2-provider-quota-stop.json'
 TEAM_FINAL_SPLIT_CONFIRMED = False  # Await the combined-policy team's exposure audit.
 CODE_PATHS = [
     'agent_framework/inference.py', 'agent_framework/runner_config.py',
@@ -32,6 +33,7 @@ CODE_PATHS = [
     'p2_anomaly/reproduce.py',
     'p2_anomaly/handoff.py',
     'p2_anomaly/shared_summary.py',
+    'p2_anomaly/cross_suite.py', 'agent_framework/tool_meta.py',
     'p2_anomaly/quota_adapter.py', 'p2_anomaly/historical_providers.py',
     'requirements.txt', 'requirements-lock.txt',
 ]
@@ -221,6 +223,7 @@ def run_plan(plan_path, max_jobs, artifact=None, resume_after_quota=False):
     if max_jobs < 1:
         raise ValueError('max-jobs must be positive')
     load_dotenv(ROOT / '.env')
+    quota_marker = QUOTA_MARKER
     plan_path = Path(plan_path).resolve()
     plan = json.loads(plan_path.read_text())
     validate_plan(plan)
@@ -229,6 +232,8 @@ def run_plan(plan_path, max_jobs, artifact=None, resume_after_quota=False):
         raise ValueError('This P2 plan pins the reviewer to its declared provider; set REVIEWER_PROVIDER accordingly')
     if provider == 'groq' and not os.getenv('GROQ_API_KEY'):
         raise ValueError('GROQ_API_KEY missing: configure local .env; do not paste it into chat')
+    if provider == 'groq' and quota_marker.exists() and not resume_after_quota:
+        raise ValueError('Provider quota stop retained; resume explicitly after reset')
     os.environ['REVIEWER_PROVIDER'] = provider
     os.environ['P2_STOP_ON_PROVIDER_ERROR'] = '1'
     os.environ['GROQ_STOP_ON_QUOTA'] = '1'
@@ -324,6 +329,8 @@ def run_plan(plan_path, max_jobs, artifact=None, resume_after_quota=False):
             entry.update(status='error', error_type='RateLimitError' if getattr(exc, 'status_code', None) == 429 else type(exc).__name__,
                          error_status=getattr(exc, 'status_code', None),
                          error_code=getattr(exc, 'code', None))
+            if entry.get('error_status') == 429:
+                save(quota_marker, {'status': 'quota_stop', 'provider': provider})
         entry['billed_response_usage_including_auxiliary'] = {
             component: {key: value - before_usage[component][key]
                         for key, value in totals.items()}
@@ -337,6 +344,8 @@ def run_plan(plan_path, max_jobs, artifact=None, resume_after_quota=False):
         # Quota, connection, server and unclassified failures stop the batch.
         if entry['status'] != 'completed' and entry.get('error_status') not in (400, 413, 422):
             break
+    if resume_after_quota and attempted and entry['status'] == 'completed':
+        quota_marker.unlink(missing_ok=True)
     return {'attempted_now': attempted, 'completed': sum(v['status'] == 'completed' for v in ledger.values()),
             'planned': len(plan['jobs'])}
 

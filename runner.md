@@ -169,6 +169,45 @@ measure this existing gate, including unsupported-tool escalation; they are
 not evidence of a cross-suite-trained detector. Trace verification checks logging
 invariants, not attack resistance or task completion.
 
+### Cross-suite candidate and budget comparison
+
+The replacement candidate is `p2_anomaly/artifacts/development/cross-suite-v2/model.joblib`.
+It recognizes all four suites and reserves review for banking changes and URL
+fetches. Training uses DEV-only references plus audited clean calls; independent
+live Slack/travel calibration is still missing. It has not been promoted or frozen.
+
+After the provider quota has reset, first compare the candidate on banking at k=2:
+
+```bash
+.venv/bin/python -m p2_anomaly.shared_run dev --suite banking --k 2 \
+  --artifact p2_anomaly/artifacts/development/cross-suite-v2/model.joblib \
+  --outdir results/dev/P2-cross-suite-v2-banking-k2 --resume-after-quota
+.venv/bin/python scripts/verify_traces.py results/dev/P2-cross-suite-v2-banking-k2
+```
+
+Then repeat with `--k 0` and `--k 5`, each with a different output directory.
+Use `--attack none` in a separate directory to check legitimate-task interference.
+Omit `--suite banking` for the full three-suite DEV run. Never resume an old
+artifact's directory with the new model/source. New directories also respect
+the retained provider quota stop. An explicit resume is for a confirmed reset.
+
+The reproducible offline routing check is:
+
+```bash
+.venv/bin/python -m p2_anomaly.replay_shared \
+  --traces results/dev/P2-shared-v01 \
+  --old p2_anomaly/artifacts/development/lmstudio-v2-category/model.joblib \
+  --candidate p2_anomaly/artifacts/development/cross-suite-v2/model.joblib \
+  --out results/offline-routing.json
+```
+
+Offline replay holds the old proposals fixed; it cannot measure new TCR or
+actual review savings. Banking tasks 5 and 10 require separate interpretation:
+task 5 can pass its utility check without a new payment, while task 10 deliberately
+rewards taking no action on an underspecified request. Keep official scores and
+verified requested actions separate. Select the smallest k that gives acceptable
+safe task completion on matched live DEV runs; no optimal k is established yet.
+
 ## P2 anomaly artifacts and experiment protocol
 
 The default anomaly artifact is unavailable; the original v1 manifest is revoked.
