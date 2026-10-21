@@ -16,7 +16,7 @@ from openai.resources.chat.completions import Completions
 
 from p2_anomaly.experiments import CODE_PATHS, digest, save
 from p2_anomaly.hosted20 import MODEL, HostedStop, hosted_factories, metrics
-from p2_anomaly.recovery import PROMPT_VERSION, agent_variant
+from p2_anomaly.recovery import PROMPT_VERSION, INSTRUCTIONS, RECOVERY_MESSAGE, TYPOGRAPHY_VERSION, agent_variant
 from p2_anomaly.shared_summary import load_summary
 
 
@@ -77,9 +77,10 @@ def main():
     if args.user_tasks and not set(args.user_tasks)<=set(splits[args.suites[0]]['user_tasks']):
         parser.error('Only published DEV task IDs are allowed')
     files=set(CODE_PATHS)|{'p2_anomaly/optimize.py','p2_anomaly/recovery.py',
-        'p2_anomaly/hosted20.py','agent_framework/policies/anomaly_authorization.py'}
+        'p2_anomaly/hosted20.py','agent_framework/policies/anomaly_authorization.py','p2_anomaly/output_format.py'}
     identity={'scope':'DEV only; matched agent/policy diagnostic; not a held-out score',
         'agent':MODEL,'reviewer':MODEL,'reviewer_prompt':'v2','agent_prompt_variant':PROMPT_VERSION,
+        'agent_instructions':INSTRUCTIONS,'recovery_message':RECOVERY_MESSAGE,'output_format':TYPOGRAPHY_VERSION,
         'artifact_sha256':digest(args.artifact),'source_sha256':{p:digest(p) for p in sorted(files)},
         'endpoint_hashes':{p:hashlib.sha256(os.environ[p+'_BASE_URL'].encode()).hexdigest() for p in ('LMSTUDIO','INFERENCE')},
         'split_sha256':{s:digest(f'splits/{s}_v1.2.json') for s in args.suites},
