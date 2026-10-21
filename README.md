@@ -246,9 +246,12 @@ python -m p2_anomaly.handoff prepare --out results/p2-teammate
 If the repository is already cloned, switch to `p2/anomaly-gate` and pull instead.
 On Windows activate the environment with `.venv\Scripts\Activate.ps1` in PowerShell.
 Create a local `.env` in the repository root containing `GROQ_API_KEY=your-own-key`
-and `REVIEWER_PROVIDER=groq`. These P2 plans pin the agent and reviewer to
-Groq `openai/gpt-oss-20b`; the general runner's local-inference options are separate
-experiments and must not be mixed into these comparisons.
+and `REVIEWER_PROVIDER=groq`. Current shared P2 plans pin the agent to
+`openai/gpt-oss-20b` and the reviewer to `openai/gpt-oss-120b`, following
+[`scripts/team_settings.sh`](scripts/team_settings.sh). Earlier P2 runs used
+20B for both roles; those historical scores must remain separate. The general
+runner's local-inference options are separate experiments and must not be mixed
+into these comparisons.
 Never send or commit this file. A new key in the same Groq organization shares
 the organization's rate limits; do not rotate keys to retry a quota failure.
 
