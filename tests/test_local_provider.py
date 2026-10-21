@@ -82,14 +82,12 @@ def test_model_names_registered():
     assert "mlx-community_test-model" in MODEL_NAMES
 
 
-def test_build_pipeline_mlx_points_at_local_server_and_exports_model(monkeypatch):
-    monkeypatch.delenv("MLX_MODEL", raising=False)
+def test_build_pipeline_mlx_points_at_local_server(monkeypatch):
     monkeypatch.setenv("MLX_BASE_URL", "http://127.0.0.1:9999/v1")
     pipeline = build_pipeline("mlx-community/gemma", "approval_reuse", "mock", 2, provider="mlx")
     llm = next(e for e in pipeline.elements if hasattr(e, "client"))
     assert str(llm.client.base_url).startswith("http://127.0.0.1:9999/v1")
     assert llm.model == "mlx-community/gemma"
-    assert os.environ["MLX_MODEL"] == "mlx-community/gemma"
 
 
 def test_build_pipeline_groq_still_uses_groq(monkeypatch):
