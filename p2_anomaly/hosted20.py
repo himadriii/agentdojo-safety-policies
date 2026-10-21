@@ -20,6 +20,8 @@ from agentdojo.agent_pipeline.llms.openai_llm import (
 )
 from agentdojo.functions_runtime import EmptyEnv
 from agentdojo.models import MODEL_NAMES
+from agentdojo.logging import Logger
+from agentdojo.types import get_text_content_as_str
 from agent_framework.inference import make_inference_client
 from agent_framework.llm_reviewer import LLMReviewer
 from p2_anomaly.experiments import CODE_PATHS, digest, save
@@ -33,15 +35,43 @@ class HostedStop(RuntimeError):
 
 
 class HostedAgent(OpenAILLM):
+    max_reasoning_continuations = 2
+
     def query(self, query, runtime, env=EmptyEnv(), messages=(), extra_args=None):
-        try:
-            response = chat_completion_request.__wrapped__(self.client, self.model,
-                [_message_to_openai(m, self.model) for m in messages],
-                [_function_to_openai(f) for f in runtime.functions.values()],
-                self.reasoning_effort, self.temperature)
-        except openai.APIError as exc:
-            raise HostedStop(type(exc).__name__) from None
-        return query, runtime, env, [*messages, _openai_to_assistant_message(response.choices[0].message)], extra_args or {}
+        working = list(messages)
+        for continuation in range(self.max_reasoning_continuations + 1):
+            payload = []
+            for message in working:
+                encoded = _message_to_openai(message, self.model)
+                if message['role'] == 'assistant':
+                    for key in ('reasoning', 'reasoning_content'):
+                        if isinstance(message.get(key), str):
+                            encoded[key] = message[key]
+                payload.append(encoded)
+            try:
+                response = chat_completion_request.__wrapped__(self.client, self.model,
+                    payload, [_function_to_openai(f) for f in runtime.functions.values()],
+                    self.reasoning_effort, self.temperature)
+            except openai.APIError as exc:
+                raise HostedStop(type(exc).__name__) from None
+            if not response.choices:
+                raise HostedStop('EMPTY_AGENT_CHOICES')
+            raw = response.choices[0].message
+            parsed = _openai_to_assistant_message(raw)
+            reasoning = {key: value for key in ('reasoning', 'reasoning_content')
+                         if isinstance(value := (raw.model_extra or {}).get(key), str) and value}
+            parsed.update(reasoning)
+            if parsed.get('tool_calls') or get_text_content_as_str(parsed.get('content') or []).strip():
+                return query, runtime, env, [*working, parsed], extra_args or {}
+            if not reasoning or continuation == self.max_reasoning_continuations:
+                raise HostedStop('EMPTY_OR_REASONING_ONLY_AGENT_RESPONSE')
+            # Continue the model's assistant state, never promote reasoning to a user answer.
+            working.append(parsed)
+            trace = Logger.get()
+            if hasattr(trace, 'set_contextarg'):
+                trace.set_contextarg('hosted_reasoning_only_continuations',
+                    trace.context.get('hosted_reasoning_only_continuations', 0) + 1)
+        raise HostedStop('AGENT_CONTINUATION_LIMIT')
 
 
 class HostedReviewer(LLMReviewer):
@@ -116,6 +146,10 @@ def main():
     parser.add_argument('--report', type=Path, required=True)
     parser.add_argument('--budgets', nargs='+', type=int, default=[2])
     parser.add_argument('--resume', action='store_true')
+    parser.add_argument('--suites', nargs='+', choices=['banking','slack','travel'],
+                        default=['banking','slack','travel'])
+    parser.add_argument('--user-tasks', nargs='+', help='Optional DEV-only pilot; requires exactly one suite')
+    parser.add_argument('--clean-first', action='store_true')
     args = parser.parse_args()
     load_dotenv(Path(__file__).resolve().parents[1] / '.env', override=True)
     for prefix in ('LMSTUDIO', 'INFERENCE'):
@@ -130,15 +164,26 @@ def main():
     if AnomalyPolicy(args.artifact).artifact is None:
         parser.error('Valid explicit gate artifact required')
     plan = schedule(args.budgets)
-    identity = {'scope': 'DEV only; primary hosted 20B/20B evaluation; separate from Groq 20B/120B',
+    plan = [j for j in plan if j['suite'] in args.suites]
+    if args.user_tasks and len(args.suites) != 1:
+        parser.error('A pilot task selection requires exactly one suite')
+    if args.user_tasks:
+        allowed = json.loads(Path(f'splits/{args.suites[0]}_v1.2.json').read_text())['dev']['user_tasks']
+        if not set(args.user_tasks) <= set(allowed) or len(set(args.user_tasks)) != len(args.user_tasks):
+            parser.error('Pilot tasks must be distinct published DEV IDs')
+    if args.clean_first:
+        plan.sort(key=lambda j:j['attack']!='none')
+    identity = {'scope': ('DEV regression pilot; not full-suite or final evaluation' if args.user_tasks
+                         else 'DEV only; primary hosted 20B/20B evaluation; separate from Groq 20B/120B'),
         'artifact_sha256': digest(args.artifact), 'agent': MODEL, 'reviewer': MODEL,
         'agent_provider': 'lmstudio', 'reviewer_provider': 'compatible', 'reviewer_prompt': 'v2',
         'agent_max_tokens': 4096, 'reviewer_max_tokens': 1024, 'temperature': 0, 'retries': 0,
+        'agent_response_mode': 'preserve-reasoning-v1', 'max_reasoning_only_continuations': 2,
         'endpoint_hashes': {p: hashlib.sha256(os.environ[p + '_BASE_URL'].encode()).hexdigest()
                             for p in ('LMSTUDIO', 'INFERENCE')},
         'source_sha256': {p: digest(p) for p in [*CODE_PATHS, 'p2_anomaly/hosted20.py']},
         'split_sha256': {s: digest(f'splits/{s}_v1.2.json') for s in ('banking', 'slack', 'travel')},
-        'jobs': plan}
+        'jobs': plan, 'pilot_user_tasks': args.user_tasks}
     args.outdir.mkdir(parents=True, exist_ok=True)
     identity_file = args.outdir / 'identity.json'
     if identity_file.exists() and json.loads(identity_file.read_text()) != identity:
@@ -160,6 +205,8 @@ def main():
                 continue
             split_file = f"splits/{job['suite']}_v1.2.json"
             split = json.loads(Path(split_file).read_text())['dev']
+            if args.user_tasks:
+                split = dict(split, user_tasks=args.user_tasks)
             output = args.outdir / name
             runtime = SimpleNamespace(provider='lmstudio', llm=MODEL, reviewer='llm',
                 reviewer_model=MODEL, policy='anomaly', benchmark_version='v1.2',

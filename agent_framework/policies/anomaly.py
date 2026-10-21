@@ -10,6 +10,7 @@ import joblib
 from agent_framework.policy import Policy
 from agent_framework.policies.anomaly_features import FEATURE_NAMES, SCHEMA_VERSION, extract_features
 from agent_framework.policies.anomaly_support import unsupported_reason
+from agent_framework.policies.anomaly_context import TRANSFORM, context_guard, transform_features
 
 DEFAULT_ARTIFACT = Path(__file__).resolve().parents[2] / 'p2_anomaly/artifacts/current/model.joblib'
 
@@ -37,6 +38,8 @@ class AnomalyPolicy(Policy):
                 raise ValueError('feature schema mismatch')
             if not math.isfinite(artifact['threshold']):
                 raise ValueError('invalid threshold')
+            if artifact.get('feature_transform') not in (None, TRANSFORM):
+                raise ValueError('unsupported feature transform')
             self.artifact = artifact
         except Exception as exc:
             self.artifact_hash = None
@@ -49,7 +52,14 @@ class AnomalyPolicy(Policy):
             return 'escalate', state, {'reason': 'anomaly coverage: unknown_tool',
                                       'scores': {'fallback': 1.0}}
         try:
+            if self.artifact.get('context_guards'):
+                guard = context_guard(context)
+                if guard:
+                    decision, reason = guard
+                    return decision, state, {'reason': reason, 'scores': {'context_guard': 1.0, 'fallback': 0.0}}
             vector = extract_features(context, self.artifact['tool_table'])
+            vector = transform_features(vector, self.artifact['tool_table'][context['proposed_call'].function],
+                                        self.artifact.get('feature_transform'))
             support_error = unsupported_reason(self.artifact, context['proposed_call'].function, vector)
             if support_error:
                 return 'escalate', state, {'reason': f'anomaly coverage: {support_error}',

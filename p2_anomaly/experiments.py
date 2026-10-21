@@ -34,6 +34,7 @@ CODE_PATHS = [
     'p2_anomaly/handoff.py',
     'p2_anomaly/shared_summary.py',
     'p2_anomaly/cross_suite.py', 'agent_framework/tool_meta.py',
+    'agent_framework/policies/anomaly_context.py', 'p2_anomaly/repair.py',
     'p2_anomaly/quota_adapter.py', 'p2_anomaly/historical_providers.py',
     'requirements.txt', 'requirements-lock.txt',
 ]
