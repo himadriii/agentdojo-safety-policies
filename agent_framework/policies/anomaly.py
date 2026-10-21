@@ -11,6 +11,7 @@ from agent_framework.policy import Policy
 from agent_framework.policies.anomaly_features import FEATURE_NAMES, SCHEMA_VERSION, extract_features
 from agent_framework.policies.anomaly_support import unsupported_reason
 from agent_framework.policies.anomaly_context import TRANSFORM, context_guard, transform_features
+from agent_framework.policies.anomaly_authorization import VERSION as AUTHORIZATION_VERSION, authorization_guard
 
 DEFAULT_ARTIFACT = Path(__file__).resolve().parents[2] / 'p2_anomaly/artifacts/current/model.joblib'
 
@@ -40,6 +41,8 @@ class AnomalyPolicy(Policy):
                 raise ValueError('invalid threshold')
             if artifact.get('feature_transform') not in (None, TRANSFORM):
                 raise ValueError('unsupported feature transform')
+            if artifact.get('authorization_guards') not in (None, AUTHORIZATION_VERSION):
+                raise ValueError('unsupported authorization guards')
             self.artifact = artifact
         except Exception as exc:
             self.artifact_hash = None
@@ -52,6 +55,11 @@ class AnomalyPolicy(Policy):
             return 'escalate', state, {'reason': 'anomaly coverage: unknown_tool',
                                       'scores': {'fallback': 1.0}}
         try:
+            if self.artifact.get('authorization_guards'):
+                authorization = authorization_guard(context)
+                if authorization:
+                    decision, reason = authorization
+                    return decision, state, {'reason': reason, 'scores': {'authorization_guard': 1.0}}
             if self.artifact.get('context_guards'):
                 guard = context_guard(context)
                 if guard:
