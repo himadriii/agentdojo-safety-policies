@@ -176,3 +176,45 @@ repair pilot, whose second clean task ended with a blank agent answer despite
 all three reads being approved. The reasoning-preservation pilot also stopped on
 an empty response. The successful endpoint regression is recorded under
 `hosted20-v2-recovered-pilot`; earlier pilot results remain unchanged.
+
+## Targeted 20B repair evaluation
+
+`cross-suite-v6` is a development candidate, not the default or a frozen release.
+Its Isolation Forest, 184 fitting calls, 36 calibration calls and threshold are
+unchanged from v3. New opt-in rules check exact requested messages, independently
+counted recipients, and explicit invitations using contact details from the
+user-named profile. Negative or conditional invitations retain review. A channel
+listing cannot grant permission to browse an injected URL, and recommendation
+requests do not automatically authorize reservations. These are additional
+authorization rules, not learned anomaly-detection improvements.
+
+The separate `task-recovery-v3` agent profile adds a trusted reminder only after
+an actual executor denial. It allows reconsideration after new evidence rather
+than treating one denial as a permanent tool ban. `plain-typography-v1` converts
+U+202F/U+00A0 spaces and U+2011 hyphens in final prose, preserving code, URLs and
+tool arguments. It changes emitted answers, not the benchmark evaluator. The
+same profile runs with full approval as a control. Earlier broad-prompt and
+formatting-instruction experiments were retained and not promoted.
+
+Run or resume the current DEV-only experiment with:
+
+```bash
+.venv/bin/python -m p2_anomaly.optimize \
+  --artifact p2_anomaly/artifacts/development/cross-suite-v6/model.joblib \
+  --outdir results/dev/P2-recovery-v3-resilient \
+  --phases recovery_baseline candidate --groq-fallback
+```
+
+Both models remain `openai/gpt-oss-20b`; reviewer prompt v2 is unchanged. The
+optional infrastructure fallback makes at most ten Groq 20B requests, exclusively
+after the primary server's specific native-output-parser failure. It never
+approves a tool call, retries quota errors or substitutes a larger model. Each
+fallback is logged in `protocol-fallback.json`; completed cached task traces and
+their provenance remain available. General HTTP 503 failures have bounded
+episode resumes. Incomplete runs do not establish a new full-suite score.
+
+This profile also changes agent behavior and output formatting. Cross-policy
+comparisons require the team to use the same profile and baseline. Its score
+must not be represented as improvement attributable to Isolation Forest alone.
+Shared runner, reviewer, executor and split files remain unchanged; held-out
+tasks remain untouched.

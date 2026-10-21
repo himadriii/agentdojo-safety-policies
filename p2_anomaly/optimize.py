@@ -18,6 +18,7 @@ from p2_anomaly.experiments import CODE_PATHS, digest, save
 from p2_anomaly.hosted20 import MODEL, HostedStop, hosted_factories, metrics
 from p2_anomaly.recovery import PROMPT_VERSION, INSTRUCTIONS, RECOVERY_MESSAGE, TYPOGRAPHY_VERSION, agent_variant
 from p2_anomaly.shared_summary import load_summary
+from p2_anomaly.protocol_fallback import VERSION as FALLBACK_VERSION, protocol_fallback
 
 
 def jobs(phases, budgets):
@@ -57,6 +58,8 @@ def main():
     parser.add_argument('--budgets',nargs='+',type=int,choices=[2,5],default=[2])
     parser.add_argument('--suites',nargs='+',choices=['banking','slack','travel'],default=['banking','slack','travel'])
     parser.add_argument('--user-tasks',nargs='+')
+    parser.add_argument('--groq-fallback',action='store_true',help='Bounded 20B-only recovery for the known native parser error')
+    parser.add_argument('--max-groq-fallbacks',type=int,choices=range(1,11),default=10)
     args=parser.parse_args()
     load_dotenv('.env',override=True)
     for prefix in ('LMSTUDIO','INFERENCE'):
@@ -68,6 +71,8 @@ def main():
     os.environ.update(REVIEWER_PROVIDER='compatible',REVIEWER_MODEL=MODEL,
                       P2_ANOMALY_MODEL=str(args.artifact.resolve()))
     from agent_framework.policies.anomaly import AnomalyPolicy
+    if args.groq_fallback and not os.getenv('GROQ_API_KEY'):
+        parser.error('Groq recovery requires the existing free-tier key')
     if AnomalyPolicy(args.artifact).artifact is None:
         parser.error('Invalid explicit gate artifact')
     if args.user_tasks and len(args.suites)!=1:
@@ -77,10 +82,13 @@ def main():
     if args.user_tasks and not set(args.user_tasks)<=set(splits[args.suites[0]]['user_tasks']):
         parser.error('Only published DEV task IDs are allowed')
     files=set(CODE_PATHS)|{'p2_anomaly/optimize.py','p2_anomaly/recovery.py',
-        'p2_anomaly/hosted20.py','agent_framework/policies/anomaly_authorization.py','p2_anomaly/output_format.py'}
+        'p2_anomaly/hosted20.py','agent_framework/policies/anomaly_authorization.py','p2_anomaly/output_format.py',
+        'p2_anomaly/protocol_fallback.py'}
     identity={'scope':'DEV only; matched agent/policy diagnostic; not a held-out score',
         'agent':MODEL,'reviewer':MODEL,'reviewer_prompt':'v2','agent_prompt_variant':PROMPT_VERSION,
         'agent_instructions':INSTRUCTIONS,'recovery_message':RECOVERY_MESSAGE,'output_format':TYPOGRAPHY_VERSION,
+        'protocol_fallback':{'version':FALLBACK_VERSION,'enabled':args.groq_fallback,
+                             'model':MODEL,'max_attempts':args.max_groq_fallbacks,'api_retries':0},
         'artifact_sha256':digest(args.artifact),'source_sha256':{p:digest(p) for p in sorted(files)},
         'endpoint_hashes':{p:hashlib.sha256(os.environ[p+'_BASE_URL'].encode()).hexdigest() for p in ('LMSTUDIO','INFERENCE')},
         'split_sha256':{s:digest(f'splits/{s}_v1.2.json') for s in args.suites},
@@ -111,7 +119,7 @@ def main():
         for attempt in range(4):
             with error_status() as status:
                 try:
-                    with hosted_factories(),agent_variant(job['phase']!='baseline'):
+                    with protocol_fallback(args.outdir,args.max_groq_fallbacks,args.groq_fallback),hosted_factories(),agent_variant(job['phase']!='baseline'):
                         returned=runner.run_one(runtime,job['k'])
                     summary=load_summary(output,returned,{'suite':job['suite'],'benchmark_version':'v1.2'},job)
                     expected=len(selected['user_tasks'])*(len(selected['injection_tasks']) if job['attack']!='none' else 1)
@@ -122,7 +130,8 @@ def main():
                     save(report_file,report)
                     break
                 except (Exception,KeyboardInterrupt) as exc:
-                    event=dict(job=job,error_type=type(exc).__name__,http_status=status.get('status'),attempt=attempt)
+                    event=dict(job=job,error_type=type(exc).__name__,http_status=status.get('status'),attempt=attempt,
+                               reason_code=str(exc)[:100] if isinstance(exc,HostedStop) else type(exc).__name__)
                     report['events'].append(event)
                     if status.get('status')==503 and attempt<3:
                         save(report_file,report)
