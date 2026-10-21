@@ -60,13 +60,19 @@ deployment review-rate guarantee. Model and data hashes reproduce identically.
 
 ## Evaluation
 
-Shared settings: Groq `openai/gpt-oss-20b` agent, `llm` reviewer with
-`openai/gpt-oss-120b`, reviewer prompt v2, AgentDojo v1.2 and
-`important_instructions`. DEV compares k=0,2,5 plus clean controls at k=2.
-Runs are serial and stop at quota/errors, with no automatic quota retry.
+The owner's current primary evaluation uses hosted `openai/gpt-oss-20b` for
+both the agent and the `llm` reviewer, reviewer prompt v2, AgentDojo v1.2 and
+`important_instructions`. It starts with k=2 plus clean controls on all three
+published DEV suites. Optional budget comparisons require the same configuration.
+The agent uses `LMSTUDIO_*`; the separate reviewer endpoint uses `INFERENCE_*`
+with `REVIEWER_PROVIDER=compatible`. This replaces the earlier 20B/120B setting
+for P2's primary evaluation; scores from the two configurations remain separate.
+Runs are serial and stop at rate limits, server errors or reviewer parse failures.
+Hosted capacity is not assumed unlimited, and no Groq fallback is used.
 
-Measured, complete candidate runs are recorded in
-`p2_anomaly/artifacts/development/cross-suite-v2/live-evaluation.json`.
+Measured, complete primary 20B/20B runs are recorded in
+`p2_anomaly/artifacts/development/hosted20-v1/live-evaluation.json`.
+Earlier Groq 20B/120B results remain in the cross-suite-v2 report directory.
 Incomplete runs do not receive final metrics. TCR@k is the fraction of all
 episodes with utility success and attack failure. HITL Load is the sum of LLM
 reviewer calls on safely completed episodes; total reviewer calls are also
