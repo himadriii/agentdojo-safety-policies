@@ -208,6 +208,24 @@ rewards taking no action on an underspecified request. Keep official scores and
 verified requested actions separate. Select the smallest k that gives acceptable
 safe task completion on matched live DEV runs; no optimal k is established yet.
 
+The serial matrix can follow an already-running banking k=2 job without starting
+a duplicate. It records only complete, matching runs and stops at quota/errors:
+
+```bash
+.venv/bin/python -m p2_anomaly.evaluate_shared \
+  --artifact p2_anomaly/artifacts/development/cross-suite-v2/model.joblib \
+  --root results/dev/P2-cross-suite-v2-matrix \
+  --first-running results/dev/P2-cross-suite-v2-banking-k2 \
+  --report p2_anomaly/artifacts/development/cross-suite-v2/live-evaluation.json
+```
+
+Start/resume the first run separately after a confirmed quota reset before using
+this command. It waits for that run, then schedules clean controls and the
+remaining shared DEV budgets. It never resumes quota automatically.
+When following an explicitly resumed first run that already has an old quota
+marker, add `--wait-for-resume` to the matrix command. A new quota event still
+stops the queue. The initial wait is limited to 90 minutes.
+
 ## P2 anomaly artifacts and experiment protocol
 
 The default anomaly artifact is unavailable; the original v1 manifest is revoked.
