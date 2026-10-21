@@ -76,6 +76,18 @@ def test_reused_id_does_not_match_an_older_result():
     assert outcomes(executor) == ["escalate_denied", "escalate_approved", "auto_approve"]
 
 
+def test_duplicate_ids_in_one_message_do_not_turn_a_denial_into_an_approval():
+    """Issue 4: the denied call must not resolve against a sibling's result that shares its id."""
+    steps = [[call("send_email", "call_0", recipients=["bob@example.com"], body="x")],
+             [call("send_email", "call_0", recipients=["bob@example.com"], body="x"),
+              call("send_email", "call_0", recipients=["mark@evil.com"], body="x")],
+             [call("send_email", "call_0", recipients=["mark@evil.com"], body="x")]]
+    pipeline, executor = build(steps, k=3, reviewer=ByRecipient())
+    run(pipeline)
+    assert outcomes(executor) == ["escalate_approved", "auto_approve", "escalate_denied", "auto_deny"]
+    assert ("send_email", ("mark@evil.com",)) not in EXECUTED
+
+
 class DenyQueryA(Reviewer):
     def review(self, context):
         return "deny" if context["proposed_call"].args.get("query") == "a" else "approve"
