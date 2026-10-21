@@ -11,6 +11,9 @@ from openai.types.chat import ChatCompletion
 
 from agentdojo.agent_pipeline.llms.openai_llm import OpenAILLM
 from agentdojo.models import MODEL_NAMES
+from agentdojo.functions_runtime import EmptyEnv
+from agentdojo.logging import Logger
+from agentdojo.types import ChatAssistantMessage, text_content_block_from_string
 
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 log = logging.getLogger(__name__)
@@ -19,6 +22,27 @@ CHANNEL_SUFFIX = re.compile(
     r"^(?P<name>.+)<\|channel\|>(?:analysis|commentary|final)$"
 )
 
+class RobustOpenAILLM(OpenAILLM):
+    """Resamples Groq 'tool_use_failed' (malformed tool call) instead of aborting the run."""
+    max_format_retries = 3
+
+    def query(self, query, runtime, env=EmptyEnv(), messages=(), extra_args={}):
+        for attempt in range(self.max_format_retries + 1):
+            try:
+                return super().query(query, runtime, env, messages, extra_args)
+            except openai.BadRequestError as e:
+                if "tool_use_failed" not in str(e):
+                    raise
+                trace = Logger.get()
+                if hasattr(trace, "set_contextarg"):
+                    n = trace.context.get("llm_tool_format_errors", 0) + 1
+                    trace.set_contextarg("llm_tool_format_errors", n)
+                if attempt == self.max_format_retries:
+                    msg = ChatAssistantMessage(
+                        role="assistant",
+                        content=[text_content_block_from_string("The model failed to produce a valid tool call.")],
+                        tool_calls=None)
+                    return query, runtime, env, [*messages, msg], extra_args
 
 def _flatten(content):
     """['text part', ...] -> 'text'. None -> ''."""
@@ -146,4 +170,4 @@ def make_groq_llm(model: str) -> OpenAILLM:
     # Attacks look the model up by name inside pipeline.name (which has "/" replaced by "_").
     MODEL_NAMES.setdefault(model, "AI assistant")
     MODEL_NAMES.setdefault(model.replace("/", "_"), "AI assistant")
-    return OpenAILLM(client, model)
+    return RobustOpenAILLM(client, model)

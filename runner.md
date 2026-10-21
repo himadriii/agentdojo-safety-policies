@@ -1,7 +1,8 @@
 # Running feat/p7_provenance
 
 This branch supports local LM Studio models and hosted inference through the same
-runner. Available policies: `full_approve`, `full_escalate`, `provenance`. Reviewers: `mock`.
+runner. Available policies: `full_approve`, `full_escalate`, `provenance`. Reviewers:
+`mock`, `mock_deny`, `llm`.
 
 ## Setup and configuration
 
@@ -130,3 +131,18 @@ changed, its provider-specific model key is used. Both local models are checked
 before the run. LM Studio requests use a JSON schema matching the current
 structured transformation format; evidence validation and decision rules remain
 unchanged.
+
+## LLM reviewer
+
+Use the existing `llm` reviewer with a nonzero budget:
+
+```bash
+.venv/bin/python -m agent_framework.runner \
+  --policy full_escalate --reviewer llm --attack none \
+  --user-tasks user_task_0 --k 2 --outdir results/reviewer-smoke --force
+```
+
+The reviewer uses the agent provider and model unless `REVIEWER_PROVIDER` or
+`REVIEWER_MODEL` is set in `.env`. `--reviewer-model` overrides the model for one
+run. A different provider uses that provider's model key when no reviewer model
+is set. Prompt and decision parsing retain this branch's existing behavior.

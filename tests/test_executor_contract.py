@@ -21,6 +21,7 @@ from agent_framework.tools_executor import (
     ResetTaskState,
     describe_tool_effects,
 )
+from agent_framework.tool_meta import get_tool_meta
 
 EXECUTED = []
 
@@ -115,7 +116,7 @@ def test_policy_receives_documented_context():
     ctx = seen[0]
     assert set(ctx) == {
         "task", "proposed_call", "environment", "trajectory",
-        "remaining_budget", "metadata", "tool_effects",
+        "remaining_budget", "metadata", "tool_effects", "tools",
     }
     assert ctx["task"] == "Find my emails."
     assert ctx["remaining_budget"] == 2
@@ -257,3 +258,52 @@ def test_unknown_decision_is_denied():
     run(pipeline)
     assert EXECUTED == []
     assert outcomes(executor) == ["unknown_decision_deny"]
+
+def test_policy_exception_falls_back_to_escalate_and_is_logged():
+    class Boom(Policy):
+        def evaluate(self, context, state):
+            raise ValueError("bug")
+
+    pipeline, executor = build(Boom(), k=2, queries=("a",))
+    run(pipeline)
+    assert outcomes(executor) == ["escalate_approved"]       # mock reviewer approves
+    assert executor.decisions[0]["policy_error"].startswith("ValueError")
+
+def test_policy_cannot_corrupt_agent_conversation():
+    class Wipe(Policy):
+        def evaluate(self, context, state):
+            context["trajectory"].clear()
+            return "approve", state
+
+    pipeline, _ = build(Wipe(), queries=("a", "b"))
+    messages = run(pipeline)
+    assert EXECUTED == ["a", "b"]
+    assert messages[0]["role"] == "system" and len(messages) >= 5
+
+def test_policy_receives_tool_metadata():
+    seen = []
+
+    class Recording(Policy):
+        def evaluate(self, context, state):
+            seen.append(context["metadata"])
+            return "approve", state
+
+    pipeline, _ = build(Recording(), queries=("a",))
+    run(pipeline)
+
+    tool = seen[0]["tool"]
+    assert tool["read_only"] is True
+    assert tool["external_side_effect"] is False
+    assert tool["irreversible"] is False
+    assert tool["untrusted_output"] is True      # search_emails returns third-party text
+    assert tool["known"] is True
+
+def test_metadata_for_write_and_unknown_tools():
+    send = get_tool_meta("send_email")
+    assert send["read_only"] is False
+    assert send["external_side_effect"] and send["irreversible"]
+    assert "recipients" in send["target_args"]
+
+    unknown = get_tool_meta("some_new_tool")
+    assert unknown["known"] is False
+    assert unknown["read_only"] is False          # conservative: unknown non-read names are treated as writes
