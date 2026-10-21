@@ -24,6 +24,7 @@ from agent_framework.budget import EscalationBudget
 from agent_framework.policy import FullEscalatePolicy
 from agent_framework.reviewer import MockReviewer, build_reviewer_context
 from agent_framework.usage import TRACKER
+from agent_framework.tool_meta import get_tool_meta
 
 log = logging.getLogger(__name__)
 
@@ -45,6 +46,7 @@ class P1ToolsExecutor(ToolsExecutor):
         self.policy_state = {}
         self.decisions = []
         self._reviewer_reason = None
+        self._tool_schemas = {}
 
     def reset_for_new_task(self):
         """Reset task-scoped state: escalation budget, policy state, logs, token counts."""
@@ -52,6 +54,16 @@ class P1ToolsExecutor(ToolsExecutor):
         self.policy_state = {}
         self.decisions = []
         TRACKER.reset()
+
+    def _tools_view(self, runtime):
+        """name -> {description, parameters}. Computed once per tool and cached."""
+        for name, fn in runtime.functions.items():
+            if name not in self._tool_schemas:
+                self._tool_schemas[name] = {
+                    "description": fn.description,
+                    "parameters": fn.parameters.model_json_schema(),
+                }
+        return copy.deepcopy(self._tool_schemas)   # a policy can't mutate the cache
 
     def query(
         self,
@@ -99,7 +111,9 @@ class P1ToolsExecutor(ToolsExecutor):
                 "trajectory": copy.deepcopy(list(messages)),     # a policy can't corrupt the agent's conversation
                 "remaining_budget": self.budget.remaining,
                 "metadata": {"step": len(self.decisions),        # fresh dict per call
-                             "decision_history": copy.deepcopy(self.decisions)},
+                             "decision_history": copy.deepcopy(self.decisions),
+                             "tool": get_tool_meta(tool_name)},
+                "tools": self._tools_view(runtime),
             }
 
             policy_error = None

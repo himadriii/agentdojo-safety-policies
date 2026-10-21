@@ -53,6 +53,38 @@ The last line prints `TCR` and `HITL`. A single task is noisy, so use it only to
 
 ## P2 anomaly gate
 
+**October 21 shared-workflow update:** this branch has integrated shared main
+`4b5ed4d` and its protected runner, executor, tool metadata and split files.
+Workspace is fully examined development data. Official held-out splits now cover
+banking, Slack and travel. The saved P2 models below remain workspace-specific;
+their historical results used a 20B reviewer and must not be reported as results
+for the current shared 120B reviewer (`v2` prompt).
+
+Current agreed settings are Groq GPT-OSS-20B agent / GPT-OSS-120B reviewer,
+free tier only. P2's collector uses scoped quota-stop factories around the shared
+runner: same normal request and prompt configuration, zero SDK/quota retries,
+and immediate stop on quota errors. Shared protected files are unchanged.
+Older adapter checks are explicitly historical; shared tests target main's code.
+
+Start clean collection only on a published DEV split:
+
+```bash
+python -m p2_anomaly.experiments plan --stage collect_shared --suite banking \
+    --out results/p2-shared-banking/plan.json
+python -m p2_anomaly.experiments run --plan results/p2-shared-banking/plan.json --max-jobs 1
+```
+
+The collector validates DEV IDs and the split checksum. Accepted calls still
+require an audit and cross-suite fitting/calibration before anomaly evaluation.
+It adapts the shared runner's on-disk summary without editing the official summary.
+Do not run a workspace model on the new suites and interpret unknown-tool
+fallbacks as learned anomaly performance. Do not run held-out tasks yet.
+The offline tool/composition audit and predeclared inner DEV partitions are in
+`shared-suite-readiness.json` and `shared-inner-plan.json` under development artifacts.
+The first six banking DEV collection episodes finished with four utility successes;
+see `shared-banking-collection.json`. These are Full-Approve collection results,
+not anomaly-policy scores, and their calls are still awaiting an audit.
+
 The `anomaly` policy learns normal calls with Isolation Forest. Scores measure
 unusualness, not probability of harm. Unusual calls and scoring failures escalate;
 the shared executor enforces the review budget. Unknown side-effect tools require

@@ -16,9 +16,6 @@ def test_llm_reviewer_uses_selected_provider_and_explicit_model(monkeypatch, pro
         payload = json.loads(request.content)
         requests.append((request.url.host, payload))
         if "tools" not in payload:
-            if request.url.host == "local.test":
-                assert payload["response_format"]["type"] == "json_schema"
-                assert payload["response_format"]["json_schema"]["schema"]["required"] == ["decision", "reason"]
             return completion({"role": "assistant", "content": '{"decision":"approve","reason":"requested read"}'})
         return completion(tool_message() if len(requests) == 1 else {"role": "assistant", "content": "Done"})
 
@@ -38,9 +35,6 @@ def test_reviewer_can_select_independent_hosted_route(monkeypatch):
         payload = json.loads(request.content)
         requests.append((request.url.host, payload["model"]))
         if "tools" not in payload:
-            if request.url.host == "local.test":
-                assert payload["response_format"]["type"] == "json_schema"
-                assert payload["response_format"]["json_schema"]["schema"]["required"] == ["decision", "reason"]
             return completion({"role": "assistant", "content": '{"decision":"approve","reason":"requested read"}'})
         return completion(tool_message() if len(requests) == 1 else {"role": "assistant", "content": "Done"})
 

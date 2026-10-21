@@ -113,19 +113,19 @@ def test_final_is_blocked_pending_team_split(tmp_path):
         make_plan('final', frozen=tmp_path, profile='course')
 
 
-def test_local_p2_agent_does_not_retry_provider_failure(monkeypatch):
+def test_historical_local_agent_does_not_retry_provider_failure(monkeypatch):
     from types import SimpleNamespace
     from agentdojo.functions_runtime import FunctionsRuntime
-    import agent_framework.inference as inference
+    from p2_anomaly.historical_providers import NoRetryGroqLLM
     calls = []
     def fail(**kwargs):
         calls.append(kwargs)
         raise RuntimeError('provider stopped')
     client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=fail)))
-    monkeypatch.setattr(inference, 'make_inference_client', lambda _: client)
     monkeypatch.setenv('P2_STOP_ON_PROVIDER_ERROR', '1')
     monkeypatch.setenv('LMSTUDIO_MAX_TOKENS', '4096')
-    llm = inference.make_inference_llm('lmstudio', 'test-model')
+    llm = NoRetryGroqLLM(client, 'test-model')
+    llm.output_limit_env = 'LMSTUDIO_MAX_TOKENS'
     with pytest.raises(RuntimeError, match='provider stopped'):
         llm.query('test', FunctionsRuntime([]))
     assert len(calls) == 1

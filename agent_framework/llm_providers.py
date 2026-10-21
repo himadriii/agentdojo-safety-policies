@@ -1,60 +1,37 @@
 """OpenAI-compatible providers that AgentDojo's get_llm does not know about (Groq)."""
 import os
-import time
 
 import openai
 
 from agentdojo.agent_pipeline.llms.openai_llm import OpenAILLM
 from agentdojo.models import MODEL_NAMES
 from agentdojo.functions_runtime import EmptyEnv
+from agentdojo.logging import Logger
+from agentdojo.types import ChatAssistantMessage, text_content_block_from_string
 
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
-_LAST_REQUEST = None
 
+class RobustOpenAILLM(OpenAILLM):
+    """Resamples Groq 'tool_use_failed' (malformed tool call) instead of aborting the run."""
+    max_format_retries = 3
 
-def _pace_request():
-    """Space agent/reviewer calls in this serial process; quota errors still stop it."""
-    global _LAST_REQUEST
-    interval = float(os.getenv('GROQ_REQUEST_INTERVAL_SECONDS', '0'))
-    if not 0 <= interval <= 30:
-        raise ValueError('request interval must be between 0 and 30 seconds')
-    if _LAST_REQUEST is not None:
-        delay = interval - (time.monotonic() - _LAST_REQUEST)
-        if delay > 0:
-            time.sleep(delay)
-    _LAST_REQUEST = time.monotonic()
-
-
-class NoRetryGroqLLM(OpenAILLM):
-    """Pinned AgentDojo conversion, without its additional tenacity retries.
-
-    Used for quota-bounded experiments. A provider error ends the current batch.
-    """
-
-    output_limit_env = 'GROQ_MAX_OUTPUT_TOKENS'
-    default_output_limit = '2048'
-
-    def query(self, query, runtime, env=EmptyEnv(), messages=(), extra_args=None):
-        from agentdojo.agent_pipeline.llms.openai_llm import (
-            _message_to_openai, _function_to_openai, _openai_to_assistant_message,
-        )
-        kwargs = {
-            'model': self.model,
-            'messages': [_message_to_openai(m, self.model) for m in messages],
-            # Match the pinned AgentDojo OpenAILLM exactly: a zero value is
-            # omitted by its `temperature or NOT_GIVEN` conversion.
-            'temperature': self.temperature or openai.NOT_GIVEN,
-            'max_completion_tokens': int(os.getenv(self.output_limit_env, self.default_output_limit)),
-        }
-        tools = [_function_to_openai(f) for f in runtime.functions.values()]
-        if tools:
-            kwargs.update(tools=tools, tool_choice='auto')
-        response = self.client.chat.completions.create(**kwargs)
-        if response.choices[0].finish_reason == 'length':
-            raise RuntimeError('agent output token cap reached; incomplete generation')
-        output = _openai_to_assistant_message(response.choices[0].message)
-        return query, runtime, env, [*messages, output], extra_args or {}
-
+    def query(self, query, runtime, env=EmptyEnv(), messages=(), extra_args={}):
+        for attempt in range(self.max_format_retries + 1):
+            try:
+                return super().query(query, runtime, env, messages, extra_args)
+            except openai.BadRequestError as e:
+                if "tool_use_failed" not in str(e):
+                    raise
+                trace = Logger.get()
+                if hasattr(trace, "set_contextarg"):
+                    n = trace.context.get("llm_tool_format_errors", 0) + 1
+                    trace.set_contextarg("llm_tool_format_errors", n)
+                if attempt == self.max_format_retries:
+                    msg = ChatAssistantMessage(
+                        role="assistant",
+                        content=[text_content_block_from_string("The model failed to produce a valid tool call.")],
+                        tool_calls=None)
+                    return query, runtime, env, [*messages, msg], extra_args
 
 def _flatten(content):
     """['text part', ...] -> 'text'. None -> ''."""
@@ -79,7 +56,6 @@ def _make_groq_compatible(client):
                 m["content"] = _flatten(m["content"])
             fixed.append(m)
         kwargs["messages"] = fixed
-        _pace_request()
         return original(*args, **kwargs)
 
     completions.create = create
@@ -90,10 +66,9 @@ def make_groq_llm(model: str) -> OpenAILLM:
     key = os.getenv("GROQ_API_KEY")
     if not key:
         raise RuntimeError("GROQ_API_KEY is not set (put it in .env in the repo root).")
-    client = openai.OpenAI(api_key=key, base_url=GROQ_BASE_URL,
-                           max_retries=int(os.getenv('GROQ_MAX_RETRIES', '8')), timeout=45)
+    client = openai.OpenAI(api_key=key, base_url=GROQ_BASE_URL, max_retries=8)
     _make_groq_compatible(client)
     # Attacks look the model up by name inside pipeline.name (which has "/" replaced by "_").
     MODEL_NAMES.setdefault(model, "AI assistant")
     MODEL_NAMES.setdefault(model.replace("/", "_"), "AI assistant")
-    return (NoRetryGroqLLM if os.getenv('GROQ_STOP_ON_QUOTA') == '1' else OpenAILLM)(client, model)
+    return RobustOpenAILLM(client, model)

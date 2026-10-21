@@ -124,7 +124,7 @@ def test_explicit_reviewer_model_reaches_executor(monkeypatch):
     pipeline = runner.build_pipeline('agent', 'full_escalate', 'llm', 2, 'groq', 'explicit-reviewer')
     assert len(reviewers) == 1
     assert pipeline.elements[0].executor.reviewer is reviewers[0]
-    assert 'explicit-reviewer' in pipeline.name
+    assert pipeline.inference_config['reviewer']['model'] == 'explicit-reviewer'
 
 
 def test_run_refuses_missing_credentials_before_network(tmp_path, monkeypatch):

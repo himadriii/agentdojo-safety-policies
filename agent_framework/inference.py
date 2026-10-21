@@ -9,7 +9,7 @@ import openai
 from agentdojo.agent_pipeline.llms.openai_llm import OpenAILLM
 from agentdojo.models import MODEL_NAMES
 
-from agent_framework.llm_providers import GROQ_BASE_URL, _flatten, _make_groq_compatible, NoRetryGroqLLM
+from agent_framework.llm_providers import GROQ_BASE_URL, _flatten, _make_groq_compatible
 
 PROVIDERS = ("openai", "groq", "lmstudio", "compatible")
 MODEL_KEYS = {
@@ -110,17 +110,10 @@ def make_inference_client(provider, *, response_schema=None):
     return client
 
 
-class NoRetryCompatibleLLM(NoRetryGroqLLM):
-    """Same pinned conversion, with no upstream retries and local output limits."""
-    output_limit_env = 'LMSTUDIO_MAX_TOKENS'
-    default_output_limit = '4096'
-
-
 def make_inference_llm(provider, model):
     MODEL_NAMES.setdefault(model, "AI assistant")
     MODEL_NAMES.setdefault(model.replace("/", "_"), "AI assistant")
-    cls = NoRetryCompatibleLLM if provider == 'lmstudio' and os.getenv('P2_STOP_ON_PROVIDER_ERROR') == '1' else OpenAILLM
-    return cls(make_inference_client(provider), model)
+    return OpenAILLM(make_inference_client(provider), model)
 
 
 def check_local_models(model_names):

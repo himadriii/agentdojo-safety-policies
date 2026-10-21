@@ -31,6 +31,8 @@ CODE_PATHS = [
     'p2_anomaly/splits.py', 'p2_anomaly/diagnostics.py',
     'p2_anomaly/reproduce.py',
     'p2_anomaly/handoff.py',
+    'p2_anomaly/shared_summary.py',
+    'p2_anomaly/quota_adapter.py', 'p2_anomaly/historical_providers.py',
     'requirements.txt', 'requirements-lock.txt',
 ]
 
@@ -100,11 +102,41 @@ def freeze_candidate(source, destination):
     return record
 
 
+def make_shared_collection_plan(suite):
+    if suite not in ('banking', 'slack', 'travel'):
+        raise ValueError('Choose a suite with a published shared split')
+    path = ROOT / 'splits' / f'{suite}_v1.2.json'
+    split = json.loads(path.read_text())
+    jobs = [{'id': f'collect_{i:03d}', 'policy': 'full_approve', 'reviewer': 'llm',
+             'k': 0, 'user_task': uid, 'injection_task': None, 'attack': 'none', 'repetition': 0}
+            for i, uid in enumerate(split['dev']['user_tasks'])]
+    return {'stage': 'collect_shared', 'suite': suite, 'benchmark_version': 'v1.2',
+            'provider': 'groq', 'model': 'openai/gpt-oss-20b', 'reviewer_model': 'openai/gpt-oss-120b',
+            'shared_split_file': str(path.relative_to(ROOT)), 'shared_split_sha256': digest(path),
+            'jobs': jobs, 'note': 'Clean DEV-only collection; no held-out tasks or injections. Calls require auditing before fitting.'}
+
+
 def validate_plan(plan):
+    if plan['stage'] == 'collect_shared':
+        expected = make_shared_collection_plan(plan['suite'])
+        for key in ('shared_split_file', 'shared_split_sha256', 'provider', 'model', 'reviewer_model', 'benchmark_version'):
+            if plan.get(key) != expected[key]:
+                raise ValueError(f'shared collection configuration changed: {key}')
+        allowed = {j['user_task'] for j in expected['jobs']}
+        seen = set()
+        for job in plan['jobs']:
+            if job['id'] in seen or job['user_task'] not in allowed:
+                raise ValueError('duplicate job or task outside shared DEV split')
+            seen.add(job['id'])
+            if (job['policy'], job['reviewer'], job['k'], job['attack'], job['injection_task']) != ('full_approve', 'llm', 0, 'none', None):
+                raise ValueError('shared collection must be clean Full-Approve with no attack')
+        return
     if plan['stage'] not in ('collect', 'development', 'final'):
         raise ValueError('invalid experiment stage')
     if plan['suite'] != 'workspace' or plan['benchmark_version'] != 'v1.2' or plan['provider'] not in ('groq', 'lmstudio'):
         raise ValueError('unexpected benchmark/provider configuration')
+    if plan['provider'] == 'groq' and (plan['model'], plan['reviewer_model']) != ('openai/gpt-oss-20b', 'openai/gpt-oss-120b'):
+        raise ValueError('Current shared Groq runs require the 20B agent and 120B reviewer; historical plans need a new directory')
     if plan['stage'] == 'final' and not plan.get('frozen_directory'):
         raise ValueError('held-out evaluation requires frozen artifacts')
     if plan['stage'] == 'final' and not TEAM_FINAL_SPLIT_CONFIRMED:
@@ -174,7 +206,8 @@ def make_plan(stage, repeats=3, frozen=None, model='openai/gpt-oss-20b', profile
                                      'k': k, 'user_task': f'user_task_{uid}',
                                      'injection_task': None if iid is None else f'injection_task_{iid}',
                                      'attack': attack, 'repetition': repetition})
-    return {'stage': stage, 'profile': profile, 'provider': provider, 'model': model, 'reviewer_model': model,
+    return {'stage': stage, 'profile': profile, 'provider': provider, 'model': model,
+            'reviewer_model': 'openai/gpt-oss-120b' if provider == 'groq' else model,
             'benchmark_version': 'v1.2', 'suite': 'workspace', 'jobs': jobs,
             'frozen_directory': str(Path(frozen).resolve()) if frozen else None,
             'freeze_sha256': digest(Path(frozen) / 'freeze.json') if frozen else None,
@@ -273,15 +306,22 @@ def run_plan(plan_path, max_jobs, artifact=None, resume_after_quota=False):
                                policy=job['policy'], benchmark_version=plan['benchmark_version'],
                                suite=plan['suite'], attack=job['attack'], user_tasks=[job['user_task']],
                                injection_tasks=[job['injection_task']] if job['injection_task'] else None,
-                               outdir=str(output), force=bool(previous))
+                               outdir=str(output), force=bool(previous), split_file=plan.get('shared_split_file'), split='dev')
         before_usage = copy.deepcopy(TRACKER.lifetime)
         try:
-            summary = run_one(args, job['k'])
+            if provider == 'groq':
+                from p2_anomaly.quota_adapter import quota_safe_shared_runner
+                with quota_safe_shared_runner():
+                    summary = run_one(args, job['k'])
+            else:
+                summary = run_one(args, job['k'])
+            from p2_anomaly.shared_summary import load_summary
+            summary = load_summary(output, summary, plan, job)
             entry['summary'] = summary
-            entry['status'] = 'completed' if summary['n'] == 1 and not summary['tasks_with_errors'] else 'error'
+            entry['status'] = 'completed' if summary['n'] == 1 and not summary['tasks_with_errors'] and not summary['tasks_with_reviewer_errors'] else 'error'
         except (Exception, KeyboardInterrupt) as exc:
             # Avoid exception messages: API errors can include entire request bodies.
-            entry.update(status='error', error_type=type(exc).__name__,
+            entry.update(status='error', error_type='RateLimitError' if getattr(exc, 'status_code', None) == 429 else type(exc).__name__,
                          error_status=getattr(exc, 'status_code', None),
                          error_code=getattr(exc, 'code', None))
         entry['billed_response_usage_including_auxiliary'] = {
@@ -315,14 +355,17 @@ def audit_collection(plan_path, output, max_calls):
         raise ValueError('only no-attack development collection can be audited for training')
     from agentdojo.functions_runtime import FunctionCall
     from agentdojo.types import get_text_content_as_str
-    from agent_framework.llm_reviewer import LLMReviewer, REVIEWER_PROMPT_VERSION, REVIEWER_SCHEMA
+    from agent_framework.llm_reviewer import LLMReviewer, REVIEWER_PROMPT_VERSION
+    if plan['provider'] == 'groq':
+        from p2_anomaly.quota_adapter import QuotaBoundReviewer
+        LLMReviewer = QuotaBoundReviewer
     from agent_framework.inference import make_inference_client
     from agent_framework.reviewer import build_reviewer_context
     from agent_framework.usage import TRACKER
     os.environ['LMSTUDIO_MAX_RETRIES'] = '0'
     os.environ['LMSTUDIO_TIMEOUT'] = '60'
     reviewer = LLMReviewer(model=plan['reviewer_model'],
-                           client=make_inference_client(plan['provider'], response_schema=REVIEWER_SCHEMA))
+                           client=make_inference_client(plan['provider']))
     output = Path(output).resolve()
     entries = json.loads(output.read_text()) if output.exists() else []
     by_hash = {e['sha256']: e for e in entries}
@@ -454,7 +497,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
     plan = sub.add_parser('plan')
-    plan.add_argument('--stage', choices=['collect', 'development', 'final'], required=True)
+    plan.add_argument('--stage', choices=['collect', 'collect_shared', 'development', 'final'], required=True)
+    plan.add_argument('--suite', choices=['workspace', 'banking', 'slack', 'travel'], default='workspace')
     plan.add_argument('--out', type=Path, required=True)
     plan.add_argument('--repeats', type=int, default=3)
     plan.add_argument('--frozen', type=Path)
@@ -478,7 +522,7 @@ def main():
     if args.command == 'plan':
         if args.out.exists():
             raise ValueError('plan already exists; use a new directory for a different manifest')
-        result = make_plan(args.stage, args.repeats, args.frozen, profile=args.profile, provider=args.provider)
+        result = make_shared_collection_plan(args.suite) if args.stage == 'collect_shared' else make_plan(args.stage, args.repeats, args.frozen, profile=args.profile, provider=args.provider)
         save(args.out, result)
         print(f"Created {len(result['jobs'])} planned episodes; no API calls made")
     else:

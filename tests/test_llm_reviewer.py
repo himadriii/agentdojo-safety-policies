@@ -79,13 +79,3 @@ def test_tokens_are_tracked_under_reviewer():
     r, _ = make(['{"decision": "approve", "reason": ""}'])
     r.review(ctx())
     assert TRACKER.totals["reviewer"] == {"calls": 1, "input_tokens": 10, "output_tokens": 5}
-
-
-def test_gpt_oss_uses_bounded_json_reasoning():
-    reviewer, fake = make(['{"decision":"approve","reason":"relevant read"}'])
-    reviewer.model = 'openai/gpt-oss-20b'
-    assert reviewer.review(ctx()) == 'approve'
-    request = fake.requests[0]
-    assert request['reasoning_effort'] == 'low'
-    assert request['response_format'] == {'type': 'json_object'}
-    assert request['max_completion_tokens'] == 2048

@@ -1,9 +1,12 @@
 import argparse
 import hashlib
-import os
 import json
 import logging
+import os
 from pathlib import Path
+import re, sys, time
+import openai
+
 
 from agentdojo.logging import OutputLogger
 from agentdojo.agent_pipeline.agent_pipeline import AgentPipeline, load_system_message
@@ -24,13 +27,12 @@ from agent_framework.tools_executor import P1ToolsExecutor, ResetTaskState
 from agent_framework.usage import track_openai_client
 
 from agent_framework.llm_providers import make_groq_llm
-from agent_framework.registry import POLICIES, REVIEWERS
-from agent_framework.llm_reviewer import REVIEWER_PROMPT_VERSION, REVIEWER_SCHEMA
 from agent_framework.inference import (
     PROVIDERS, component_settings, make_inference_client, make_inference_llm,
 )
 from agent_framework.runner_config import load_runner_env, validate_inference_args
-
+from agent_framework.registry import POLICIES, REVIEWERS
+from agent_framework.llm_reviewer import REVIEWER_PROMPT_VERSION
 
 def build_pipeline(llm_name, policy_name, reviewer_name, k, provider="openai", reviewer_model=None):
     if not llm_name or not llm_name.strip():
@@ -46,25 +48,18 @@ def build_pipeline(llm_name, policy_name, reviewer_name, k, provider="openai", r
 
     inference_config = {"agent": {"provider": provider, "model": llm_name}}
     policy = POLICIES[policy_name]()
-    if policy_name == 'anomaly' and policy.artifact is None:
-        raise RuntimeError('Anomaly model unavailable or revoked. Set P2_ANOMALY_MODEL to a validated artifact.')
-    if reviewer_name == "llm":
+    if reviewer_name in ("llm", "local_llm"):
         reviewer_provider, reviewer_model = component_settings(
             "REVIEWER", provider, llm_name, reviewer_model
         )
         reviewer = REVIEWERS[reviewer_name](
-            model=reviewer_model,
-            client=make_inference_client(reviewer_provider, response_schema=REVIEWER_SCHEMA),
+            model=reviewer_model, client=make_inference_client(reviewer_provider)
         )
         inference_config["reviewer"] = {"provider": reviewer_provider, "model": reviewer_model}
-        reviewer_tag = f"llm-{REVIEWER_PROMPT_VERSION}-{reviewer.model}"
     else:
         reviewer = REVIEWERS[reviewer_name]()
-        reviewer_tag = reviewer_name
     executor = P1ToolsExecutor(
-        policy=policy,
-        reviewer=reviewer,
-        budget=EscalationBudget(limit=k),
+        policy=policy, reviewer=reviewer, budget=EscalationBudget(limit=k),
     )
     pipeline = AgentPipeline([
         ResetTaskState(executor),
@@ -73,12 +68,13 @@ def build_pipeline(llm_name, policy_name, reviewer_name, k, provider="openai", r
         llm,
         ToolsExecutionLoop([executor, llm]),
     ])
-    # Retain P2 artifact and reviewer identities while separating inference routes.
+    # Separate local and hosted results, including policy/reviewer model overrides.
     pipeline.inference_config = inference_config
     config_key = hashlib.sha256(json.dumps(inference_config, sort_keys=True).encode()).hexdigest()[:10]
-    artifact_tag = getattr(policy, 'artifact_hash', None)
-    policy_tag = f"{policy_name}-{artifact_tag[:12]}" if artifact_tag else policy_name
-    pipeline.name = f"{provider}-{llm_name}-{policy_tag}-{reviewer_tag}-k{k}-{config_key}".replace("/", "_")
+    reviewer_tag = f"{reviewer_name}{REVIEWER_PROMPT_VERSION}" if reviewer_name == "llm" else reviewer_name
+    pipeline.name = (
+        f"{provider}-{llm_name}-{policy_name}-{reviewer_tag}-k{k}-{config_key}"
+    ).replace("/", "_")
     return pipeline
 
 
@@ -89,31 +85,47 @@ def read_trace(logdir, pipeline_name, suite_name, user_task, attack_name, inject
     except FileNotFoundError:
         return {}
 
+def run_with_resume(fn, max_wait_s=900, max_tries=6):
+    """Re-run fn() after a rate-limit error. Cached tasks are skipped, so this resumes where it stopped."""
+    for attempt in range(max_tries):
+        try:
+            return fn()
+        except openai.RateLimitError as e:
+            m = re.search(r"try again in (?:(\d+)h)?(?:(\d+)m)?(?:([\d.]+)s)?", str(e))
+            wait = (int(m.group(1) or 0) * 3600 + int(m.group(2) or 0) * 60 + float(m.group(3) or 0)) if m else None
+            if wait is None or wait > max_wait_s or attempt == max_tries - 1:
+                sys.exit(f"Rate limit not recoverable by waiting ({wait}s). Rerun later; finished tasks are cached.\n{e}")
+            print(f"[runner] rate limit; sleeping {wait + 5:.0f}s then resuming")
+            time.sleep(wait + 5)
+
 
 def run_one(args, k):
     logdir = Path(args.outdir)
-    pipeline = build_pipeline(args.llm, args.policy, args.reviewer, k, args.provider,
-                              getattr(args, 'reviewer_model', None))
+    pipeline = build_pipeline(args.llm, args.policy, args.reviewer, k, args.provider, args.reviewer_model)
     suite = get_suite(args.benchmark_version, args.suite)
     user_tasks = args.user_tasks or None
 
-    with OutputLogger(str(logdir)):
-        if args.attack == "none":
-            attack_name = "none"
-            # loops over tasks and calls suite.run_task_with_pipeline, which calls pipeline.query once per task.
-            res = benchmark_suite_without_injections(
+    # Load the attack once, outside the retry loop.
+    if args.attack == "none":
+        attack, attack_name = None, "none"
+    else:
+        attack = load_attack(args.attack, suite, pipeline)
+        attack_name = attack.name
+
+    def _bench():
+        if attack is None:
+            return benchmark_suite_without_injections(
                 pipeline, suite, logdir=logdir, force_rerun=args.force,
                 user_tasks=user_tasks, benchmark_version=args.benchmark_version,
             )
-        else:
-            attack = load_attack(args.attack, suite, pipeline)
-            attack_name = attack.name
-            # loops over tasks and calls suite.run_task_with_pipeline, which calls pipeline.query once per task.
-            res = benchmark_suite_with_injections(
-                pipeline, suite, attack, logdir=logdir, force_rerun=args.force,
-                user_tasks=user_tasks, injection_tasks=args.injection_tasks or None,
-                benchmark_version=args.benchmark_version,
-            )
+        return benchmark_suite_with_injections(
+            pipeline, suite, attack, logdir=logdir, force_rerun=args.force,
+            user_tasks=user_tasks, injection_tasks=args.injection_tasks or None,
+            benchmark_version=args.benchmark_version,
+        )
+
+    with OutputLogger(str(logdir)):
+        res = run_with_resume(_bench)
 
     rows, tokens = {}, {}
     for (user_id, inj_id), utility in res["utility_results"].items():
@@ -121,8 +133,7 @@ def run_one(args, k):
         attack_succeeded = bool(res["security_results"][(user_id, inj_id)]) if args.attack != "none" else False
         trace = read_trace(logdir, pipeline.name, suite.name, user_id, attack_name, inj_id)
         decisions = trace.get("approval_decisions", [])
-        trace_error = trace.get('error') or (None if trace else 'missing_trace')
-        completed_safely = bool(utility) and not attack_succeeded and not trace_error
+        completed_safely = bool(utility) and not attack_succeeded
         rows[f"{user_id}|{inj_id}"] = {
             "utility": bool(utility),
             "attack_succeeded": attack_succeeded,
@@ -131,12 +142,7 @@ def run_one(args, k):
             "budget_exhausted_denials": sum(d["outcome"] == "budget_exhausted_deny" for d in decisions),
             "auto_denials": sum(d["outcome"] == "auto_deny" for d in decisions),
             "executed_calls": sum(d["executed"] for d in decisions),
-            "error": trace_error,
-            "proposed_calls": len(decisions),
-            "flagged_calls": sum(d['decision'] != 'approve' for d in decisions),
-            "policy_latency_s": sum(d.get('policy_latency_s', 0) for d in decisions),
-            "reviewer_errors": sum(str(d.get('reviewer_reason') or '').startswith('REVIEWER_ERROR') for d in decisions),
-            "reviewer_parse_failures": sum(str(d.get('reviewer_reason') or '').startswith('REVIEWER_PARSE_FAILURE') for d in decisions),
+            "error": trace.get("error"),   # context-length / server errors: not real completions
         }
         for comp, t in trace.get("token_usage", {}).items():
             agg = tokens.setdefault(comp, {"calls": 0, "input_tokens": 0, "output_tokens": 0})
@@ -146,7 +152,7 @@ def run_one(args, k):
     n = max(len(rows), 1)
     summary = {
         "provider": args.provider, "inference": pipeline.inference_config,
-        "policy": args.policy, "reviewer": args.reviewer, "llm": args.llm, "k": k,
+        "policy": args.policy, "reviewer": args.reviewer, "llm": args.llm, "k": k, "reviewer_model": args.reviewer_model,
         "suite": suite.name, "attack": attack_name, "n": len(rows),
         "tcr": sum(r["completed_safely"] for r in rows.values()) / n,
         "hitl_load_completed": sum(r["escalations"] for r in rows.values() if r["completed_safely"]),
@@ -154,16 +160,13 @@ def run_one(args, k):
         "tasks_with_errors": sum(r["error"] is not None for r in rows.values()),
         "token_usage": tokens,   # excludes the injection-task-as-user-task baseline runs
         "rows": rows,
-        "reviewer_model": pipeline.inference_config.get("reviewer", {}).get("model"),
-        "benchmark_version": args.benchmark_version,
-        "pipeline_name": pipeline.name,
+        "split_file": args.split_file, "split": args.split
     }
     out = logdir / pipeline.name
     out.mkdir(parents=True, exist_ok=True)
     (out / f"summary_{suite.name}_{attack_name}.json").write_text(json.dumps(summary, indent=2))
     print(f"[{args.policy}] k={k} TCR={summary['tcr']:.3f} "
           f"HITL(completed)={summary['hitl_load_completed']} n={len(rows)}")
-    return summary
 
 
 def main():
@@ -184,8 +187,19 @@ def main():
     p.add_argument("--injection-tasks", nargs="*")
     p.add_argument("--outdir", default="results")
     p.add_argument("--force", action="store_true")
+    p.add_argument("--split-file", default=None, help="Run the shared comparison set from a split file")
+    p.add_argument("--split", choices=["dev", "heldout"], default="dev")
     args = p.parse_args()
-    validate_inference_args(p, args)
+    if args.split_file:
+        sp = json.loads(Path(args.split_file).read_text())
+        args.suite = sp["suite"]
+        args.user_tasks = sp[args.split]["user_tasks"]
+        args.injection_tasks = sp[args.split]["injection_tasks"]
+        if not args.user_tasks or not args.injection_tasks:
+            sys.exit(f"{args.split_file}: '{args.split}' split is empty; refusing to run the whole suite")
+        if args.split == "heldout" and os.getenv("FINAL_RUN") != "1":
+            sys.exit("heldout is for the frozen final run only. Set FINAL_RUN=1 to confirm.")
+    validate_inference_args(p, args, providers=PROVIDERS, has_provenance=False)
     for k in args.k:
         run_one(args, k)
 

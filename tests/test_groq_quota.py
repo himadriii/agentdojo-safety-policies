@@ -1,3 +1,4 @@
+"""Checks for adapters used in historical P2 experiments, not shared main."""
 from types import SimpleNamespace
 
 import httpx
@@ -5,7 +6,7 @@ import openai
 import pytest
 from agentdojo.functions_runtime import FunctionsRuntime
 
-from agent_framework.llm_providers import NoRetryGroqLLM
+from p2_anomaly.historical_providers import NoRetryGroqLLM
 from tests.test_llm_reviewer import make, ctx
 
 
@@ -29,14 +30,17 @@ def test_agent_does_not_retry_quota():
 
 def test_reviewer_propagates_quota_in_free_tier_mode(monkeypatch):
     monkeypatch.setenv('GROQ_STOP_ON_QUOTA', '1')
-    reviewer, fake = make([quota_error()])
+    from p2_anomaly.historical_reviewer import LLMReviewer
+    from tests.test_llm_reviewer import FakeCompletions
+    fake = FakeCompletions([quota_error()])
+    reviewer = LLMReviewer(model="m", client=SimpleNamespace(chat=SimpleNamespace(completions=fake)))
     with pytest.raises(openai.RateLimitError):
         reviewer.review(ctx())
     assert len(fake.requests) == 1 and reviewer.errors == 1
 
 
 def test_agent_and_reviewer_share_request_pacing(monkeypatch):
-    import agent_framework.llm_providers as providers
+    import p2_anomaly.historical_providers as providers
     now, sleeps = [10.], []
     def sleep(seconds):
         sleeps.append(seconds)
