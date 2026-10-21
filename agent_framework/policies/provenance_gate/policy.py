@@ -90,7 +90,9 @@ def build_evidence_log(evidence: dict) -> dict:
                     with_source(edge)
                     for edge in edges
                     if edge.get("argument_path") == path
-                    and edge.get("relation") in {"provides_value", "derived_from"}
+                    and edge.get("relation") in {
+                        "provides_value", "derived_from", "generated_from",
+                    }
                 ],
             }
             for path, value in sorted(
@@ -167,7 +169,9 @@ def _argument_confidence(evidence, authorizations, path, value):
         edge
         for edge in evidence["edges"]
         if edge["argument_path"] == path
-        and edge["relation"] in {"provides_value", "derived_from"}
+        and edge["relation"] in {
+            "provides_value", "derived_from", "generated_from",
+        }
         and edge.get("verified") is True
     ]
     scores = []
