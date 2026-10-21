@@ -142,6 +142,33 @@ The reviewer uses the agent provider and model unless `REVIEWER_PROVIDER` or
 run. A different provider uses that provider's model key when no reviewer model
 is set. Prompt and decision parsing retain this branch's existing behavior.
 
+## P2 shared compatibility and DEV (free tier)
+
+Use the team settings (Groq 20B agent, 120B reviewer, v2 prompt,
+`important_instructions`, v1.2, k=2) with an explicit gate artifact:
+
+```bash
+.venv/bin/python -m p2_anomaly.shared_run compat \
+  --artifact p2_anomaly/artifacts/development/lmstudio-v2-category/model.joblib \
+  --outdir results/compat/P2-shared-v01
+.venv/bin/python scripts/verify_traces.py results/compat/P2-shared-v01
+.venv/bin/python -m p2_anomaly.shared_run dev \
+  --artifact p2_anomaly/artifacts/development/lmstudio-v2-category/model.joblib \
+  --outdir results/dev/P2-shared-v01
+.venv/bin/python scripts/verify_traces.py results/dev/P2-shared-v01
+```
+
+This wrapper preserves the shared agent/reviewer requests and stops immediately
+on quota instead of invoking the runner's automatic rate-limit retries. After a
+provider reset, repeat with `--resume-after-quota`; completed traces are cached.
+Keep the output directory tied to one source/model version. DEV uses only the
+published DEV IDs; held-out tasks are unavailable through this command.
+
+The current artifact was trained on workspace calls. Cross-suite DEV results
+measure this existing gate, including unsupported-tool escalation; they are
+not evidence of a cross-suite-trained detector. Trace verification checks logging
+invariants, not attack resistance or task completion.
+
 ## P2 anomaly artifacts and experiment protocol
 
 The default anomaly artifact is unavailable; the original v1 manifest is revoked.
