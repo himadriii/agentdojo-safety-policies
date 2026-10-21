@@ -15,7 +15,11 @@ from agentdojo.models import MODEL_NAMES
 
 DEFAULT_BASE_URL = "http://127.0.0.1:11234/v1"
 DEFAULT_MAX_TOKENS = 4096
-_CONTEXT_ERRORS = ("prompt exceeds maximum context length", "does not fit in gpu memory")
+_CONTEXT_ERRORS = (
+    "prompt exceeds maximum context length",
+    "does not fit in gpu memory",
+    "rotatingkvcache quantization",   # LM Studio's MLX engine fails on long prompts with a quantized KV cache
+)
 
 
 def base_url() -> str:

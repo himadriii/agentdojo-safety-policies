@@ -61,6 +61,7 @@ def test_developer_role_and_list_content_are_fixed():
 @pytest.mark.parametrize("message,status", [
     ("Prompt exceeds maximum context length (40000 > 32768)", 400),
     ("Internal server error: KV cache does not fit in GPU memory", 500),
+    ("Error in iterating prediction stream: NotImplementedError: RotatingKVCache Quantization NYI", 400),
 ])
 def test_context_and_memory_errors_become_context_length_exceeded(message, status):
     client, _ = fake_client(raise_with=message, status=status)

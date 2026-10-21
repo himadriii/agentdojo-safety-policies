@@ -19,7 +19,8 @@ def _write_run(root, pipeline, policy, k, attack, rows, decisions, tokens=None):
 
 
 def test_summarize_builds_one_row_per_run_with_separate_attack_columns(tmp_path):
-    reuse = [{"outcome": "escalate_approved", "reviewer_called": True, "scores": {"gate_ms": 1.0}},
+    reuse = [{"outcome": "escalate_denied", "reviewer_called": True, "reviewer_reason": "REVIEWER_PARSE_FAILURE",
+              "scores": {"gate_ms": 1.0}},
              {"outcome": "auto_approve", "reviewer_called": False, "scores": {"reuse_approved": 1.0, "gate_ms": 3.0}},
              {"outcome": "auto_approve", "reviewer_called": False,
               "scores": {"reuse_approved": 1.0, "reuse_drilldown": 1.0, "gate_ms": 4.0}},
@@ -35,7 +36,8 @@ def test_summarize_builds_one_row_per_run_with_separate_attack_columns(tmp_path)
     assert reuse_row["reviews_saved_approval"] == 2 and reuse_row["reviews_saved_drilldown"] == 1
     assert reuse_row["reviews_saved_denial"] == 1
     assert reuse_row["mean_gate_ms"] == 2.5
-    assert reuse_row["live_attack_success"] == 0.0 and reuse_row["reviewer_unparseable"] == 1
+    # one from the legacy trace key, one from the P1 reviewer's REVIEWER_PARSE_FAILURE reason
+    assert reuse_row["live_attack_success"] == 0.0 and reuse_row["reviewer_unparseable"] == 2
     clean_row = next(r for r in rows if r["policy"] == "full_escalate")
     assert clean_row["live_attack_success"] is None
     assert "replay_attack_success" not in reuse_row

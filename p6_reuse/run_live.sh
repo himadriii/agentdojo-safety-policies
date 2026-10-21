@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# P6 final live runs on a local MLX-Serve server (plan KTD10, KTD11).
+# P6 final live runs on a local LM Studio server (plan KTD10, KTD11), with P1's shared LLM reviewer
+# (`--reviewer llm`, the same model unless REVIEWER_MODEL is set in .env).
 #
 # usage: MODEL=<served gpt-oss-20b id> bash p6_reuse/run_live.sh [user-tasks-per-suite]
 #        DRY_RUN=1 MODEL=x bash p6_reuse/run_live.sh     # list the stages without running anything
@@ -15,12 +16,12 @@
 set -u
 cd "$(dirname "$0")/.."
 
-MODEL="${MODEL:?set MODEL to the served model id, e.g. gpt-oss-20b-MXFP4-Q8}"
+MODEL="${MODEL:?set MODEL to the served model id, e.g. openai/gpt-oss-20b}"
 N="${1:-12}"
 case "$N" in ''|*[!0-9]*|0) echo "user-tasks-per-suite must be a positive integer, got '$N'"; exit 2 ;; esac
 PY="${PYTHON:-.venv/bin/python}"
 OUT="${OUTDIR:-results/p6_live_g2}"
-export MLX_BASE_URL="${MLX_BASE_URL:-http://127.0.0.1:11234/v1}"
+export LMSTUDIO_BASE_URL="${LMSTUDIO_BASE_URL:-http://127.0.0.1:1234/v1}"
 mkdir -p "$OUT"
 
 log() { echo "$(date '+%F %T') $*" | tee -a "$OUT/progress.txt"; }
@@ -62,8 +63,8 @@ stage() {  # suite policy k attack
   [ -n "${DRY_RUN:-}" ] && { log "DRY_RUN: $suite $policy k=$k $attack users=[$users] injections=[${injections:-}]"; return; }
   # shellcheck disable=SC2086
   # ${extra[@]+...}: an empty array under `set -u` aborts on macOS's bash 3.2
-  if "$PY" -W ignore -m agent_framework.runner --provider mlx --llm "$MODEL" --policy "$policy" \
-      --reviewer local_llm --suite "$suite" --attack "$attack" --user-tasks $users ${extra[@]+"${extra[@]}"} \
+  if "$PY" -W ignore -m agent_framework.runner --provider lmstudio --llm "$MODEL" --policy "$policy" \
+      --reviewer llm --suite "$suite" --attack "$attack" --user-tasks $users ${extra[@]+"${extra[@]}"} \
       --k "$k" --outdir "$OUT" >> "$OUT/log.txt" 2>&1; then
     log "DONE  $suite $policy k=$k $attack"
   else

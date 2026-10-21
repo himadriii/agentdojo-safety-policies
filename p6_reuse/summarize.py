@@ -32,7 +32,10 @@ def summarize_run(summary_path: Path) -> dict:
         trace = read_trace(run_dir.parent, run_dir.name, s["suite"], user_task, s["attack"],
                            None if inj == "None" else inj)
         decisions.extend(trace.get("approval_decisions", []))
-        unparseable += trace.get("reviewer_unparseable", 0)
+        # P1's reviewer marks a parse failure or server error in each decision's reviewer_reason; the old
+        # P6 reviewer counted them in the trace instead.
+        unparseable += trace.get("reviewer_unparseable", 0) + sum(
+            str(d.get("reviewer_reason") or "").startswith("REVIEWER_") for d in trace.get("approval_decisions", []))
     gate_ms = [d["scores"]["gate_ms"] for d in decisions if (d.get("scores") or {}).get("gate_ms") is not None]
     n = len(rows) or 1
     attacked = s["attack"] != "none"

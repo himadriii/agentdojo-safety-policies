@@ -36,22 +36,19 @@ python -m p6_reuse.replay                        # offline replay -> results/p6/
 python -m p6_reuse.summarize --outdir results/p6_live_g2   # tables from live runs
 ```
 
-Live runs use a local MLX-Serve server (OpenAI-compatible) through `--provider mlx`, and the `local_llm` reviewer on the same model:
+Live runs use a local LM Studio server (OpenAI-compatible) through `--provider lmstudio`, with P1's shared LLM reviewer (`--reviewer llm`, which uses the agent's model unless `REVIEWER_MODEL` is set). Start the LM Studio server (Developer tab, or `lms server start --port 1234`), load the model, then:
 
 ```bash
-/Applications/MLX-Serve.app/Contents/MacOS/mlx-serve serve --host 127.0.0.1 --ctx-size 32768 \
-    --model-dir ~/.mlx-serve/models --model-dir ~/.lmstudio/models
-bash p6_reuse/smoke.sh lmstudio-community/gemma-4-E4B-it-MLX-4bit          # smoke
-MODEL=mlx-community/gpt-oss-20b-MXFP4-Q8 bash p6_reuse/run_live.sh        # final grid, resumable
-DRY_RUN=1 MODEL=x bash p6_reuse/run_live.sh                                # list the stages only
+bash p6_reuse/smoke.sh openai/gpt-oss-20b                    # smoke
+MODEL=openai/gpt-oss-20b bash p6_reuse/run_live.sh           # final grid, resumable
+DRY_RUN=1 MODEL=x bash p6_reuse/run_live.sh                  # list the stages only
+bash p6_reuse/run_audit.sh 10                                # leak audit: k=10, shadow review of every reuse approval
+python -m p6_reuse.audit_report --outdir results/p6_live_audit
 ```
 
-`MLX_BASE_URL` (default `http://127.0.0.1:11234/v1`) and `MLX_MAX_TOKENS` (default 4096) configure the provider. The provider makes four fixes for MLX-Serve:
+Inference settings come from `.env` (see `.env.example`): `LMSTUDIO_BASE_URL` (default `http://127.0.0.1:1234/v1`), `LMSTUDIO_MAX_TOKENS` (default 4096) and `REVIEWER_PROVIDER` / `REVIEWER_MODEL` for a separate reviewer. `--provider mlx` is no longer selectable from the runner. P6's MLX-Serve client is still in `agent_framework/local_provider.py`, and `inference.make_inference_client("mlx")` can use it, but the shared runner does not offer it. The audit script's `--shadow-audit` flag is P6 harness only: it asks the reviewer about each reuse approval without enforcing the answer.
 
-- Forces temperature 0, because AgentDojo sends 0.0 as "not given".
-- Sets `max_tokens`, because MLX-Serve defaults an omitted value to 100.
-- Maps `developer` to `system`.
-- Turns MLX-Serve's context-length and GPU-memory errors into AgentDojo's recorded `context_length_exceeded` task error.
+LM Studio's MLX engine can fail with `RotatingKVCache Quantization NYI` on long prompts (workspace `user_task_35`, travel `user_task_11`). `local_provider.py` maps that error to AgentDojo's recorded `context_length_exceeded` task error, but the shared LM Studio client does not, so such a task crashes the stage. Turn off KV cache quantization for the model in LM Studio. AgentDojo scores a skipped task as attack success, so the audit report counts errored runs separately.
 
 The held-out split is fixed in `p6_reuse/data/split.json`:
 
@@ -96,9 +93,9 @@ Replay attack success with the ideal reviewer is 0.000 for full-escalate, P6 and
 
 **Live-trace check (Oct 21, 2026).** Replaying the real policy with an approve-all reviewer over the 16 no-attack live trajectories where full-approve completed the task (`results/p6_live_full`: 2 travel, 6 slack, 8 workspace), mean reviews per run fall from 5.00 to 1.50 (travel), 3.33 to 2.83 (slack) and 2.00 to 1.88 (workspace) with drill-down on, and the tasks finishable at k = 1 / 2 / 3 go from 0/0/0 to 1/2/2 (travel), 0/1/4 to 0/3/5 (slack) and 3/7/7 to 4/7/7 (workspace). The new read address guard costs about 0.1 extra reviews per workspace run. This does not predict live TCR, which the reviewer's own denials limit.
 
-## Smoke test on MLX-Serve (Oct 20, 2026)
+## Smoke test on MLX-Serve (Oct 20, 2026, historical)
 
-Attempted with Gemma-4-E4B. The server started and listed both Gemma and gpt-oss-20b, and the request reached it through `--provider mlx`. MLX-Serve then refused to load Gemma: "needs ~8.3 GB free … but only 4.4 GB is available". Close other apps, or pass `--skip-mem-preflight` if you accept the crash risk, and rerun `smoke.sh`. Gpt-oss-20b (12 GB on disk) needs more free memory still. No live numbers exist yet.
+Attempted with Gemma-4-E4B. The server started and listed both Gemma and gpt-oss-20b, and the request reached it through `--provider mlx`. MLX-Serve then refused to load Gemma: "needs ~8.3 GB free … but only 4.4 GB is available". Gpt-oss-20b (12 GB on disk) needs more free memory still. The live grids (`results/p6_live_full`, `results/p6_live_audit`) were run on LM Studio with `openai/gpt-oss-20b` instead, and the scripts now target LM Studio.
 
 ## Owner deliverables (contract section 11)
 
@@ -110,11 +107,11 @@ Attempted with Gemma-4-E4B. The server started and listed both Gemma and gpt-oss
 
 ## Open items
 
-- **Tool annotations (waiting on P1).** The executor context carries no tool schema, so the gate infers read vs side effect from the name. Once the contract adds tool descriptions or annotations (for example MCP `readOnlyHint`) to the context, resolve in this order: annotation, then the `tool_table.py` entry, then the verb rule, then side effect. Also use the description to veto a read verb whose text says it sends, deletes or writes.
+- **Tool metadata (now available from P1).** The executor context carries `context["tools"]` (descriptions and parameter schemas) and `context["metadata"]["tool"]` (`agent_framework/tool_meta.py`: `read_only`, `target_args`, `sensitive_output`, `untrusted_output`). The gate still uses its own `tool_table.py` and the verb rule. Resolve in this order once switching: P1's metadata, then the `tool_table.py` entry, then the verb rule, then side effect. P1's `sensitive_output` flag would also give the sensitivity profile below. Also use the description to veto a read verb whose text says it sends, deletes or writes.
 - **Sensitivity profile (optional).** Drill-down already allows reads across data sources when the arguments are grounded (a calendar read can cover an email search whose query came from the calendar output). A deployer who wants private sources kept apart needs a per-tool source label; there is none yet.
 - **Live rerun.** The live grid in `results/p6_live_full` predates drill-down. Rerun the approval_reuse stages (and ideally with a stronger reviewer) to measure it.
 
 ## Configuration
 
-- Registry names: `approval_reuse`, `similarity_reuse` (policies); `local_llm` (reviewer, reads `MLX_MODEL`, which `--provider mlx` sets from `--llm`).
+- Registry names: `approval_reuse`, `similarity_reuse` (policies). The reviewer is P1's shared `LLMReviewer`, registered as `llm` (the pipeline name carries the prompt version) and `local_llm` (same class, no version tag). Its model comes from the agent's provider and model, or `REVIEWER_PROVIDER` / `REVIEWER_MODEL` in `.env`.
 - Wrapping another base: `functools.partial(ApprovalReusePolicy, base=SomePolicy())`.
