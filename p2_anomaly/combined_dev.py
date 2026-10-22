@@ -7,8 +7,11 @@ from pathlib import Path
 import subprocess
 import sys
 from types import SimpleNamespace
+from urllib.parse import urlparse
 
 import openai
+import httpx
+from dotenv import dotenv_values
 
 from p2_anomaly.experiments import CODE_PATHS, digest, save
 from p2_anomaly.local20 import local_factories, runtime_identity
@@ -20,6 +23,52 @@ from p2_anomaly.shared_summary import load_summary
 
 ROOT = Path(__file__).resolve().parents[1]
 POLICIES = ('anomaly_provenance', 'anomaly', 'provenance')
+
+
+@contextmanager
+def hosted_clients(base_url):
+    """Pin every inference role to one explicit LM Studio host, without retries."""
+    from agent_framework import runner
+    from agent_framework.inference import _make_compatible
+    from p2_anomaly import hosted20
+    originals = runner.make_inference_client, hosted20.make_inference_client
+    clients = []
+    def factory(provider, **kwargs):
+        if provider != 'compatible':
+            raise ValueError('Matched hosted runs cannot change provider')
+        client = openai.OpenAI(base_url=base_url,
+            api_key=os.getenv('INFERENCE_API_KEY') or 'local-inference',
+            max_retries=0,timeout=300,
+            default_headers={'ngrok-skip-browser-warning':'1'})
+        client = _make_compatible(client, 'lmstudio', kwargs.get('response_schema'))
+        clients.append(client)
+        return client
+    runner.make_inference_client = hosted20.make_inference_client = factory
+    try:
+        yield
+    finally:
+        runner.make_inference_client, hosted20.make_inference_client = originals
+        for client in clients:
+            client.close()
+
+
+def hosted_identity(base_url):
+    parsed = urlparse(base_url)
+    if parsed.scheme != 'https' or parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise ValueError('Supply a credential-free HTTPS endpoint URL')
+    with httpx.Client(timeout=20,trust_env=False) as client:
+        response = client.get(base_url.rstrip('/')+'/models',headers={
+            'Authorization':'Bearer '+(os.getenv('INFERENCE_API_KEY') or 'local-inference'),
+            'ngrok-skip-browser-warning':'1'})
+        response.raise_for_status()
+        models = [m['id'] for m in response.json()['data']]
+    if MODEL not in models:
+        raise ValueError('The hosted endpoint must provide the agreed 20B model')
+    return {'provider':'lmstudio','base_url':base_url.rstrip('/'),'model':MODEL,
+            'server_model_digest':'not exposed by endpoint','api_retries':0,
+            'agent_max_tokens':4096,'policy_max_tokens':2048,'reviewer_max_tokens':2048,
+            'effective_reasoning_effort':'server configured; compatible transport omits flag',
+            'no_cloud_fallback':True}
 
 
 class EvaluationStop(BaseException):
@@ -67,7 +116,17 @@ def main():
     p.add_argument('--suites', nargs='+', choices=('banking','slack','travel'), default=['slack','banking','travel'])
     p.add_argument('--attack', choices=('none','important_instructions'), default='important_instructions')
     p.add_argument('--user-tasks', nargs='+')
+    p.add_argument('--provider', choices=('ollama','lmstudio'), default='ollama')
+    p.add_argument('--base-url', help='Explicit HTTPS LM Studio /v1 endpoint')
+    p.add_argument('--env-file', type=Path, help='Read credentials privately; never copy into results')
     args = p.parse_args()
+    if args.env_file:
+        private = dotenv_values(args.env_file)
+        key = private.get('LMSTUDIO_API_KEY') or private.get('INFERENCE_API_KEY')
+        if key:
+            os.environ['INFERENCE_API_KEY'] = key
+    if args.provider == 'lmstudio' and not args.base_url:
+        p.error('Hosted evaluation needs --base-url')
     if args.user_tasks and len(args.suites) != 1:
         p.error('DEV task selection requires one suite')
     splits = {s:json.loads((ROOT/f'splits/{s}_v1.2.json').read_text())['dev'] for s in args.suites}
@@ -81,14 +140,14 @@ def main():
     from agent_framework.policies.anomaly import AnomalyPolicy
     if AnomalyPolicy(artifact).artifact is None:
         p.error('A valid explicit anomaly artifact is required')
-    runtime = runtime_identity()
+    runtime = runtime_identity() if args.provider == 'ollama' else hosted_identity(args.base_url)
     sources = set(CODE_PATHS) | {str(x.relative_to(ROOT)) for folder in ('agent_framework','p2_anomaly')
                               for x in (ROOT/folder).rglob('*.py') if 'artifacts' not in x.parts}
     plan = [{'policy':policy,'suite':suite,'attack':args.attack,'k':2}
             for suite in args.suites for policy in args.policies]
     identity = {'scope':'DEV composition study only; no held-out selection',
         'jobs':plan,'splits':splits,'user_tasks':args.user_tasks,'model':MODEL,
-        'runtime':runtime,'artifact_sha256':digest(artifact),
+        'provider':args.provider,'runtime':runtime,'artifact_sha256':digest(artifact),
         'source_sha256':{s:digest(ROOT/s) for s in sorted(sources)},
         'agent_recovery':True,'reviewer_json':True,'banking_review_guidance':True,
         'provenance_response_schema':'structured schema from merged main',
@@ -115,7 +174,9 @@ def main():
                 split_file=str(ROOT/f"splits/{job['suite']}_v1.2.json"),split='dev',
                 outdir=str(output),force=False,shadow_audit=False)
             print('Starting matched DEV '+name,flush=True)
-            with local_factories(True,outdir,runtime), policy_clients(), reviewer_json_variant(True), banking_review_variant(True), hosted_factories('compatible'), agent_variant(True):
+            backend = (local_factories(True,outdir,runtime) if args.provider == 'ollama'
+                       else hosted_clients(args.base_url))
+            with backend, policy_clients(), reviewer_json_variant(True,allowed_base_url=args.base_url if args.provider=='lmstudio' else None), banking_review_variant(True), hosted_factories('compatible'), agent_variant(True):
                 result = runner.run_one(run_args,2)
             summary = load_summary(output,result,{'suite':job['suite'],'benchmark_version':'v1.2'},job)
             expected = len(users)*(len(selected['injection_tasks']) if job['attack']!='none' else 1)
@@ -133,7 +194,8 @@ def main():
         return 2
     finally:
         # Release this study's model copy on success, protocol failure or interruption.
-        subprocess.run(['/opt/homebrew/bin/ollama','stop','gpt-oss:20b'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        if args.provider == 'ollama':
+            subprocess.run(['/opt/homebrew/bin/ollama','stop','gpt-oss:20b'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     report['status'] = 'completed matched DEV comparison'; save(report_path,report)
     return 0
 

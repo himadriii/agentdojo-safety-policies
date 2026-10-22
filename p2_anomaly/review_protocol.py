@@ -9,7 +9,7 @@ RESPONSE_FORMAT={'type':'json_schema','json_schema':{'name':'approval_decision',
 
 
 @contextmanager
-def reviewer_json_variant(enabled):
+def reviewer_json_variant(enabled, allowed_base_url=None):
     if not enabled:
         yield
         return
@@ -22,7 +22,8 @@ def reviewer_json_variant(enabled):
             super().__init__(*args,**kwargs)
             endpoint=str(self.client.base_url).rstrip('/')
             local=getattr(self.client,'local_ollama',False) and endpoint=='http://127.0.0.1:11434'
-            if endpoint!='https://api.groq.com/openai/v1' and not local:
+            allowed_hosted = allowed_base_url is not None and endpoint == allowed_base_url.rstrip('/')
+            if endpoint!='https://api.groq.com/openai/v1' and not local and not allowed_hosted:
                 raise ValueError('Strict review protocol requires Groq or the local Ollama bridge')
             original_create=self.client.chat.completions.create
             def create(*args,**kwargs):

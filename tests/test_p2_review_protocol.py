@@ -27,3 +27,16 @@ def test_json_protocol_preserves_real_review_decision_and_restores_factories(mon
             raise RuntimeError()
     assert hosted20.HostedReviewer is original
     assert runner.build_pipeline is build
+
+
+def test_hosted_protocol_requires_explicit_matching_endpoint():
+    from p2_anomaly import hosted20
+    def client(url):
+        return NS(base_url=url,chat=NS(completions=NS(create=lambda **kwargs: None)))
+    with reviewer_json_variant(True):
+        with pytest.raises(ValueError):
+            hosted20.HostedReviewer(client=client('https://host.test/v1'))
+    with reviewer_json_variant(True,allowed_base_url='https://host.test/v1'):
+        hosted20.HostedReviewer(client=client('https://host.test/v1/'))
+        with pytest.raises(ValueError):
+            hosted20.HostedReviewer(client=client('https://different.test/v1'))

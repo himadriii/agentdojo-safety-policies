@@ -6,7 +6,7 @@ import pytest
 
 from agent_framework import runner
 from agent_framework.policies import anomaly_provenance
-from p2_anomaly.combined_dev import policy_clients, EvaluationStop
+from p2_anomaly.combined_dev import policy_clients, EvaluationStop, hosted_clients, hosted_identity
 
 
 def test_policy_transport_schema_limit_and_restore(monkeypatch):
@@ -37,3 +37,32 @@ def test_api_failure_cannot_be_scored_as_policy_decision(monkeypatch):
         client=runner.make_inference_client('compatible',response_schema={})
         with pytest.raises(EvaluationStop):
             client.chat.completions.create()
+
+
+def test_hosted_transport_pins_endpoint_and_disables_retries(monkeypatch):
+    from p2_anomaly import hosted20
+    captured=[]; closed=[]
+    def factory(**settings):
+        captured.append(settings)
+        return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **k: k)),
+                               close=lambda:closed.append(True))
+    monkeypatch.setattr(openai,'OpenAI',factory)
+    old_runner=runner.make_inference_client
+    old_agent=hosted20.make_inference_client
+    with hosted_clients('https://host.test/v1'):
+        client=runner.make_inference_client('compatible')
+        options=client.chat.completions.create(model='model',messages=[],temperature=0)
+        assert options['temperature']==0
+        with pytest.raises(ValueError):
+            runner.make_inference_client('groq')
+    assert captured[0]['base_url']=='https://host.test/v1'
+    assert captured[0]['max_retries']==0
+    assert closed==[True]
+    assert runner.make_inference_client is old_runner
+    assert hosted20.make_inference_client is old_agent
+
+
+@pytest.mark.parametrize('url',['http://host.test/v1','https://key@host.test/v1','https://host.test/v1?key=secret'])
+def test_hosted_url_rejects_embedded_credentials(url):
+    with pytest.raises(ValueError):
+        hosted_identity(url)

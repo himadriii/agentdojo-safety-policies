@@ -429,6 +429,13 @@ changed code/model settings. The model unloads when the study stops or finishes.
 The implementation and transport checks pass the full 544-test suite. Combined
 benchmark results are pending; no improvement is claimed from offline tests.
 
+Hosted comparisons use `--provider lmstudio --base-url https://HOST/v1
+--env-file /path/to/private/.env` and a new output directory. The same endpoint
+serves agent, provenance and reviewer. Credentials are read privately; the run
+has no retries or cloud fallback. Hosted model weight digests are not exposed,
+and reasoning settings are controlled by the server. Never pool this cohort
+with the earlier interrupted local run. Hosted transport checks pass all 549 tests.
+
 The isolated P2 integration branch merges main at `a2f3c1c` and preserves main's
 runner, executor and provider implementations. The merged tree passes all 391
 tests after updating a stale provenance-schema test assertion to match the
