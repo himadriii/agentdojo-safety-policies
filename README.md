@@ -317,6 +317,17 @@ python -m p2_anomaly.experiments summarize --plan results/p2-final/plan.json
 The freeze directory does not exist yet; these commands are for the next stage,
 not part of the initial teammate handoff. Final evidence remains necessary before
 claiming improvements; there is no guaranteed AgentDojo score or pass threshold.
+## Running locally on MLX-Serve (no Groq quota)
+
+`--provider mlx` runs the agent on a local OpenAI-compatible [MLX-Serve](https://github.com/ddalcu/mlx-serve) server (default `http://127.0.0.1:11234/v1`, override with `MLX_BASE_URL`). `--reviewer local_llm` asks the same local model to review escalations.
+
+```bash
+python -m agent_framework.runner --provider mlx --llm mlx-community/gpt-oss-20b-MXFP4-Q8 \
+    --policy approval_reuse --reviewer local_llm --suite slack --attack none \
+    --user-tasks user_task_1 --k 2 --outdir results/smoke
+```
+
+P6's approval-reuse gate (`approval_reuse`, plus the `similarity_reuse` comparison), its offline probe set and replay, and the live-run scripts are described in [`docs/p6_approval_reuse.md`](docs/p6_approval_reuse.md).
 
 ## Adding a policy
 
