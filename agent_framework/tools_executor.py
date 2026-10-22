@@ -1,4 +1,6 @@
+import json
 import logging
+import re
 import copy
 import time
 from ast import literal_eval
@@ -27,6 +29,56 @@ from agent_framework.usage import TRACKER
 from agent_framework.tool_meta import get_tool_meta
 
 log = logging.getLogger(__name__)
+
+
+def describe_tool_effects(tool) -> dict:
+    """Infer conservative effects from a runtime tool's public contract."""
+
+    name = str(getattr(tool, "name", ""))
+    description = str(getattr(tool, "description", "") or "")
+    text = f"{name.replace('_', ' ')} {description}".casefold()
+
+    deletes = bool(re.search(r"\b(delete|deletes|deleted|cancel|cancels|cancellation)\b", text))
+    communicates = bool(
+        re.match(r"^(?:send|share)[ _]", name.casefold())
+        or re.search(r"\b(send|sends|share|shares|shared)\b", description.casefold())
+        or re.search(
+            r"\bemail(?:s|ed|ing)?\s+(?:the\s+)?(?:new\s+)?participants?\b",
+            description.casefold(),
+        )
+    )
+    changes_state = bool(
+        deletes
+        or communicates
+        or re.search(
+            r"\b(create|creates|append|adds?|reschedule|reschedules|"
+            r"update|updates|write|writes|mark|marks|marked)\b",
+            text,
+        )
+    )
+    reads = bool(
+        re.search(r"\b(get|returns?|retrieve|search|searches|find|finds|list|read)\b", text)
+    )
+
+    effects = []
+    if reads:
+        effects.append("read")
+    if changes_state:
+        effects.append("state_change")
+    if communicates:
+        effects.append("communication")
+    if deletes:
+        effects.append("deletion")
+    if not effects:
+        effects.append("unknown")
+
+    return {
+        "tool_name": name,
+        "description": description,
+        "effects": effects,
+        "non_mutating_read": effects == ["read"],
+        "source": "runtime_tool_contract",
+    }
 
 # Goes in BOTH content and error: every provider converter sends `error`
 # (and ignores `content`) when error is set.
@@ -110,9 +162,13 @@ class P1ToolsExecutor(ToolsExecutor):
                 "environment": env,                              # read-only by contract
                 "trajectory": copy.deepcopy(list(messages)),     # a policy can't corrupt the agent's conversation
                 "remaining_budget": self.budget.remaining,
-                "metadata": {"step": len(self.decisions),        # fresh dict per call
-                             "decision_history": copy.deepcopy(self.decisions),
-                             "tool": get_tool_meta(tool_name)},
+                "metadata": {
+                    **extra_args,
+                    "step": len(self.decisions),
+                    "decision_history": copy.deepcopy(self.decisions),
+                    "tool": get_tool_meta(tool_name),
+                },
+                "tool_effects": describe_tool_effects(runtime.functions[tool_name]),
                 "tools": self._tools_view(runtime),
             }
 
@@ -140,6 +196,8 @@ class P1ToolsExecutor(ToolsExecutor):
                 "budget_remaining": self.budget.remaining,
                 "reason": info.get("reason"),
                 "scores": info.get("scores"),
+                "validation_errors": info.get("validation_errors"),
+                "evidence": info.get("evidence"),
                 "policy_error": policy_error,
                 "policy_latency_s": round(latency, 4),
             })
@@ -148,7 +206,30 @@ class P1ToolsExecutor(ToolsExecutor):
             if hasattr(trace_logger, "set_contextarg"):  # NullLogger has no such method
                 trace_logger.set_contextarg("approval_decisions", self.decisions)
 
-            log.info("[P1] %s: %s (%s)", "APPROVED" if approved else "DENIED", tool_name, outcome)
+            log_method = log.info if approved else log.warning
+            log_method(
+                "[P1] %s tool=%s args=%s decision=%s outcome=%s "
+                "budget_remaining=%s reason=%s%s",
+                "APPROVED" if approved else "DENIED",
+                tool_name,
+                json.dumps(tool_call.args, ensure_ascii=False),
+                decision,
+                outcome,
+                self.budget.remaining,
+                info.get("reason") or "<no reason provided>",
+                (
+                    " validation_errors="
+                    + json.dumps(info["validation_errors"], ensure_ascii=False)
+                    if info.get("validation_errors")
+                    else ""
+                ),
+            )
+            if info.get("evidence") is not None:
+                log.info(
+                    "[P1:EVIDENCE] tool=%s %s",
+                    tool_name,
+                    json.dumps(info["evidence"], ensure_ascii=False),
+                )
 
             if approved:
                 result, error = runtime.run_function(env, tool_name, tool_call.args)
