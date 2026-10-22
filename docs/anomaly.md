@@ -312,3 +312,49 @@ The audit and resume state are in
 `p2_anomaly/artifacts/development/full-v5-resilient/`; source hashes match commit
 `8fbf8af`, and trace verification reports zero problems. Resume the same command
 only after quota resets. No freeze or held-out test was performed.
+
+## Local 20B evaluation on the M4 Mac
+
+The local backend uses Ollama's `gpt-oss:20b` MXFP4 weights for both roles, served
+as one model copy with sequential requests. The logical model identifier remains
+`openai/gpt-oss-20b`; the native model tag, immutable digest, server version and
+quantization are recorded in the run configuration. Local results form a separate
+cohort and never reuse Groq or remote-LM-Studio scores. Cloud fallback is rejected.
+
+Start the local server (Ollama must be installed and `gpt-oss:20b` downloaded):
+
+```bash
+env OLLAMA_HOST=127.0.0.1:11434 OLLAMA_NO_CLOUD=1 \
+  OLLAMA_CONTEXT_LENGTH=16384 OLLAMA_NUM_PARALLEL=1 \
+  OLLAMA_MAX_LOADED_MODELS=1 OLLAMA_FLASH_ATTENTION=1 \
+  OLLAMA_KV_CACHE_TYPE=q8_0 OLLAMA_KEEP_ALIVE=10m ollama serve
+```
+
+Run/resume the complete DEV gate and matched clean baseline:
+
+```bash
+.venv/bin/python -m p2_anomaly.optimize \
+  --artifact p2_anomaly/artifacts/development/cross-suite-v7/model.joblib \
+  --outdir results/dev/P2-local20-full-v1 --provider ollama \
+  --phases candidate recovery_baseline --banking-review-guidance --reviewer-json
+```
+
+The native adapter preserves assistant reasoning and tool-result identity. It
+uses a 16,384-token context with `truncate=false` and `shift=false`, so excessive
+inputs stop instead of silently discarding task or attack text. Critical macOS
+memory pressure stops inference and unloads only this model. No other apps are
+closed. A 24 GB M4 can load this model, but concurrent apps may slow down and the
+fanless laptop may get warm. Live checks showed about 12 GB on GPU, AC power,
+and elevated but non-critical memory pressure. Keep the laptop on a hard surface.
+After the run, `ollama stop gpt-oss:20b` releases model memory; the downloaded
+weights remain on disk. No login service was installed.
+
+The local check exposed an upstream sampling issue: the AgentDojo helper sends
+`temperature or NOT_GIVEN`, omitting zero for agent requests. The existing local
+compatible adapter already supplied zero, and the reviewer explicitly passed zero,
+but earlier Groq-native agent runs did not enforce their nominal temperature=0
+metadata. The local bridge now sends zero explicitly, and future scoped Groq
+requests enforce zero. Historical results are not rewritten or pooled. The
+runtime and sampling audit are in
+`p2_anomaly/artifacts/development/local20-runtime/`. The anomaly model/data and
+threshold remain unchanged by this transport change.

@@ -16,6 +16,7 @@ def test_groq_agent_and_reviewer_share_pacing_and_output_cap():
             Completions.create(object(), model='openai/gpt-oss-20b', max_tokens=1024)
         sleep.assert_called_once_with(55)
         assert request.call_args_list[0].kwargs['max_tokens'] == 4096
+        assert request.call_args_list[0].kwargs['temperature'] == 0
         assert request.call_args_list[1].kwargs['max_tokens'] == 1024
 
 

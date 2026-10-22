@@ -69,7 +69,9 @@ class HostedAgent(OpenAILLM):
                         print(f'Groq rejected tool format; bounded repair {format_retries}/3', flush=True)
                         continue
                     code = getattr(exc, 'code', None)
-                    raise HostedStop(type(exc).__name__ + (':' + str(code) if code else '')) from None
+                    failure=HostedStop(type(exc).__name__ + (':' + str(code) if code else ''))
+                    failure.http_status=getattr(exc,'status_code',None)
+                    raise failure from None
             if not response.choices:
                 raise HostedStop('EMPTY_AGENT_CHOICES')
             raw = response.choices[0].message
@@ -94,7 +96,9 @@ class HostedReviewer(LLMReviewer):
     def review(self, context):
         result = super().review(context)
         if not self.last_reason or str(self.last_reason).startswith(('REVIEWER_ERROR', 'REVIEWER_PARSE_FAILURE')):
-            raise HostedStop(self.last_reason or 'REVIEWER_REASON_MISSING')
+            failure=HostedStop(getattr(self.client,'last_stop_reason',None) or self.last_reason or 'REVIEWER_REASON_MISSING')
+            failure.http_status=getattr(self.client,'last_http_status',None)
+            raise failure
         return result
 
 
@@ -104,7 +108,7 @@ def hosted_factories(provider="lmstudio"):
     original_agent, original_reviewer = runner.make_inference_llm, runner.REVIEWERS['llm']
     original_groq = runner.make_groq_llm
     def make_agent(provider, model):
-        if provider not in ('lmstudio', 'groq') or model != MODEL:
+        if provider not in ('lmstudio', 'groq', 'compatible') or model != MODEL:
             raise ValueError('Hosted20 agent configuration changed')
         MODEL_NAMES.setdefault(model, 'AI assistant')
         MODEL_NAMES.setdefault(model.replace('/', '_'), 'AI assistant')

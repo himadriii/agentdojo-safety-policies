@@ -1,4 +1,4 @@
-"""Opt-in Groq reviewer response protocol; decision instructions stay unchanged."""
+"""Opt-in Groq or local reviewer response protocol; decision instructions stay unchanged."""
 from contextlib import contextmanager
 
 VERSION='review-json-v1'
@@ -20,8 +20,10 @@ def reviewer_json_variant(enabled):
     class JsonReviewer(original_reviewer):
         def __init__(self,*args,**kwargs):
             super().__init__(*args,**kwargs)
-            if str(self.client.base_url).rstrip('/')!='https://api.groq.com/openai/v1':
-                raise ValueError('Strict review protocol requires the Groq endpoint')
+            endpoint=str(self.client.base_url).rstrip('/')
+            local=getattr(self.client,'local_ollama',False) and endpoint=='http://127.0.0.1:11434'
+            if endpoint!='https://api.groq.com/openai/v1' and not local:
+                raise ValueError('Strict review protocol requires Groq or the local Ollama bridge')
             original_create=self.client.chat.completions.create
             def create(*args,**kwargs):
                 kwargs.update(max_tokens=MAX_TOKENS,reasoning_effort='low',response_format=RESPONSE_FORMAT)
