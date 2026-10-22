@@ -264,3 +264,40 @@ Reports and limitations are under
 `p2_anomaly/artifacts/development/banking-workflow-v4/`. Broader banking DEV and
 cross-suite regression validation remain before this profile can replace a
 complete score. Keep k=2 and the anomaly threshold unchanged while comparing.
+
+## Full Groq development run: response-protocol fixes
+
+The complete candidate evaluation targets 20 clean and 46 attacked episodes on
+the published banking/Slack/travel DEV split at k=2. Both models remain 20B.
+The first attempt stopped on a reviewer parsing failure, not a quota error.
+The opt-in `--reviewer-json` profile uses Groq strict JSON schema, low reasoning
+effort, and a 2,048-token reviewer output allowance; its decision instructions
+remain those of the named reviewer profile. The agent uses `task-recovery-v5`.
+Its learned model, fitting/calibration data and threshold are unchanged.
+
+The next attempt completed clean banking at 5/6 with HITL Load 4 and total
+reviewer calls 4. The remaining failure asked for a missing subscription start
+date; no gate denial caused it. Slack then stopped on an agent HTTP 400. A
+non-executing replay returned a valid tool call, so the original error code was
+not established. The latest transport wrapper retries only explicit Groq
+`tool_use_failed` errors, at most three times per agent query, matching the shared
+runner's bounded behavior. Other errors, including quota errors, stop immediately.
+All completed episodes are retained, including the subscription and Slack
+summary failures; unfinished API-error episodes are not scored as completed.
+
+Run/resume the latest cohort without changing source or configuration:
+
+```bash
+.venv/bin/python -m p2_anomaly.optimize \
+  --artifact p2_anomaly/artifacts/development/cross-suite-v7/model.joblib \
+  --outdir results/dev/P2-groq20-full-v5-resilient \
+  --provider groq --phases candidate --banking-review-guidance --reviewer-json
+```
+
+The output directory records exact source/artifact hashes and cache provenance.
+An interrupted cohort is not a complete score. The statistical-trigger audit in
+`artifacts/development/recovery-v3/statistical-trigger-audit.json` attributes the
+previous cohort's 35 reviews to 22 mandatory sensitive-action reviews, 9 coverage
+fallbacks, and 4 Isolation Forest flags. Two statistical flags were approved and
+two denied. This does not establish causal TCR or attack-safety gains from the
+learned detector; no matched live detector ablation has been completed.

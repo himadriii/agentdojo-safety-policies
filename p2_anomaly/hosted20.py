@@ -36,9 +36,11 @@ class HostedStop(RuntimeError):
 
 class HostedAgent(OpenAILLM):
     max_reasoning_continuations = 2
+    max_groq_format_retries = 3
 
     def query(self, query, runtime, env=EmptyEnv(), messages=(), extra_args=None):
         working = list(messages)
+        format_retries = 0
         for continuation in range(self.max_reasoning_continuations + 1):
             payload = []
             for message in working:
@@ -48,12 +50,26 @@ class HostedAgent(OpenAILLM):
                         if isinstance(message.get(key), str):
                             encoded[key] = message[key]
                 payload.append(encoded)
-            try:
-                response = chat_completion_request.__wrapped__(self.client, self.model,
-                    payload, [_function_to_openai(f) for f in runtime.functions.values()],
-                    self.reasoning_effort, self.temperature)
-            except openai.APIError as exc:
-                raise HostedStop(type(exc).__name__) from None
+            while True:
+                try:
+                    response = chat_completion_request.__wrapped__(self.client, self.model,
+                        payload, [_function_to_openai(f) for f in runtime.functions.values()],
+                        self.reasoning_effort, self.temperature)
+                    break
+                except openai.APIError as exc:
+                    recoverable = (isinstance(exc, openai.BadRequestError)
+                        and getattr(exc, 'code', None) == 'tool_use_failed'
+                        and str(getattr(self.client, 'base_url', '')).rstrip('/') == 'https://api.groq.com/openai/v1')
+                    if recoverable and format_retries < self.max_groq_format_retries:
+                        format_retries += 1
+                        trace = Logger.get()
+                        if hasattr(trace, 'set_contextarg'):
+                            trace.set_contextarg('groq_tool_format_retries',
+                                trace.context.get('groq_tool_format_retries', 0) + 1)
+                        print(f'Groq rejected tool format; bounded repair {format_retries}/3', flush=True)
+                        continue
+                    code = getattr(exc, 'code', None)
+                    raise HostedStop(type(exc).__name__ + (':' + str(code) if code else '')) from None
             if not response.choices:
                 raise HostedStop('EMPTY_AGENT_CHOICES')
             raw = response.choices[0].message

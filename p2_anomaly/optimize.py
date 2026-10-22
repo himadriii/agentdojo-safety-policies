@@ -50,7 +50,9 @@ def error_status(groq=False, clock_state=None):
             last_request[0]=time.monotonic()
             kwargs.setdefault("max_tokens",4096)
         try:
-            return original(self,*args,**kwargs)
+            response=original(self,*args,**kwargs)
+            state.pop("status",None)
+            return response
         except openai.APIError as exc:
             state['status']=getattr(exc,'status_code',None)
             raise
@@ -127,7 +129,7 @@ def main():
         'endpoint_hashes':{p:hashlib.sha256(os.environ[p+'_BASE_URL'].encode()).hexdigest() for p in ('LMSTUDIO','INFERENCE')} if args.provider=='lmstudio' else {'groq':'https://api.groq.com/openai/v1'},
         'split_sha256':{s:digest(f'splits/{s}_v1.2.json') for s in args.suites},
         'jobs':plan,'pilot_tasks':args.user_tasks,'pilot_injection_tasks':args.injection_tasks,'temperature':0,'agent_max_tokens':4096,
-        'reviewer_max_tokens':REVIEW_MAX_TOKENS if args.reviewer_json else 1024,'api_retries':0,'max_503_resumes_per_job':3}
+        'reviewer_max_tokens':REVIEW_MAX_TOKENS if args.reviewer_json else 1024,'api_retries':0,'max_groq_tool_format_retries':3,'max_503_resumes_per_job':3}
     args.outdir.mkdir(parents=True,exist_ok=True)
     report_file=args.outdir/'evaluation.json'
     report=json.loads(report_file.read_text()) if report_file.exists() else dict(configuration=identity,results={},events=[])

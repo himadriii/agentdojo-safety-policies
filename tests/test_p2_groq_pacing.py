@@ -32,3 +32,15 @@ def test_quota_error_is_recorded_without_retry():
                 raise AssertionError('Quota errors must stop the run')
         assert state['status'] == 429
         assert request.call_count == 1
+
+
+def test_success_clears_recovered_http_error_status():
+    import pytest
+    error=openai.BadRequestError('format',response=httpx.Response(400,
+        request=httpx.Request('POST','https://api.groq.com/openai/v1/chat/completions')),body={'code':'tool_use_failed'})
+    with patch.object(Completions,'create',side_effect=[error,'ok']):
+        with error_status() as state:
+            with pytest.raises(openai.BadRequestError):Completions.create(object())
+            assert state['status']==400
+            assert Completions.create(object())=='ok'
+            assert 'status' not in state
