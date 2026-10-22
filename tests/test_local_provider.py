@@ -70,6 +70,21 @@ def test_context_and_memory_errors_become_context_length_exceeded(message, statu
     assert info.value.code == "context_length_exceeded"
 
 
+def test_lmstudio_client_maps_the_kv_cache_error_too():
+    from agent_framework.inference import _make_compatible
+    message = "NotImplementedError: RotatingKVCache Quantization NYI"
+
+    def create(*args, **kwargs):
+        response = httpx2.Response(400, request=httpx2.Request("POST", DEFAULT_BASE_URL))
+        raise openai.BadRequestError(message, response=response, body={"message": message})
+
+    client = _make_compatible(SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))),
+                              "lmstudio")
+    with pytest.raises(openai.BadRequestError) as info:
+        client.chat.completions.create(model="m", messages=[])
+    assert info.value.code == "context_length_exceeded"
+
+
 def test_other_errors_pass_through_unchanged():
     client, _ = fake_client(raise_with="model not found", status=400)
     with pytest.raises(openai.BadRequestError) as info:
