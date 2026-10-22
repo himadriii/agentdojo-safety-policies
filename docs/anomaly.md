@@ -358,3 +358,11 @@ requests enforce zero. Historical results are not rewritten or pooled. The
 runtime and sampling audit are in
 `p2_anomaly/artifacts/development/local20-runtime/`. The anomaly model/data and
 threshold remain unchanged by this transport change.
+
+The held-out runner is prepared in `p2_anomaly.final20`. It requires the complete
+DEV gate and matched baseline, disjoint fitting/calibration families, audited
+live calibration, unchanged source/splits/model/runtime, team configuration
+confirmation, a committed freeze record/tag, and `FINAL_RUN=1`. It supports the
+project budgets 0/1/2/3/5 and caches completed results without resampling failures.
+Preparing this runner does not read or execute held-out tasks; no final freeze
+has been created while team configuration confirmation is pending.
