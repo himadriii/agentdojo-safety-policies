@@ -45,3 +45,16 @@ def test_local_agent_can_use_hosted_provenance_without_changing_agent_route(monk
     pipeline = runner.build_pipeline("local-agent", "provenance", "mock", 0, "lmstudio")
     assert run_query(pipeline) == ["invoice 42"]
     assert requests == [("local.test", "local-agent"), ("production.test", "hosted-checker"), ("local.test", "local-agent")]
+
+
+def test_combined_policy_configures_its_nested_provenance_gate(monkeypatch):
+    fake_server(monkeypatch, lambda request: completion({"role": "assistant", "content": "Done"}))
+    pipeline = runner.build_pipeline(
+        "selected-model", "p4_p6_p7_combined_or", "mock", 2, "lmstudio"
+    )
+    combined = pipeline.elements[0].executor.policy
+    assert combined.provenance.model == "selected-model"
+    assert pipeline.inference_config["policy"] == {
+        "provider": "lmstudio",
+        "model": "selected-model",
+    }

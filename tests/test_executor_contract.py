@@ -16,6 +16,7 @@ from agent_framework.budget import EscalationBudget
 from agent_framework.policy import FullEscalatePolicy, Policy
 from agent_framework.reviewer import MockReviewer
 from agent_framework.tools_executor import (
+    ATTACK_DENIAL_MESSAGE,
     DENIAL_MESSAGE,
     P1ToolsExecutor,
     ResetTaskState,
@@ -147,6 +148,57 @@ def test_auto_deny_blocks_execution_and_returns_feedback():
     assert len(tool_msgs) == 2
     assert all(m["error"] == DENIAL_MESSAGE for m in tool_msgs)
     assert outcomes(executor) == ["auto_deny", "auto_deny"]
+
+
+def test_untrusted_influence_denial_tells_agent_to_resume_original_task():
+    pipeline, executor = build(
+        Fixed(
+            "deny",
+            {
+                "reason": "combined denial",
+                "evidence": {
+                    "components": {
+                        "p7": {
+                            "decision": "deny",
+                            "reason": "untrusted_influence detected",
+                        }
+                    }
+                },
+            },
+        ),
+        queries=("a",),
+    )
+    messages = run(pipeline)
+    tool_message = next(message for message in messages if message["role"] == "tool")
+    assert tool_message["error"] == ATTACK_DENIAL_MESSAGE
+    assert "complete every remaining authorized step" in tool_message["error"]
+    assert outcomes(executor) == ["auto_deny"]
+
+
+def test_untrusted_edge_without_attack_denial_uses_generic_feedback():
+    pipeline, _ = build(
+        Fixed(
+            "deny",
+            {
+                "reason": "combined denial",
+                "evidence": {
+                    "components": {
+                        "p7": {
+                            "decision": "escalate",
+                            "reason": "incomplete provenance for argument /body",
+                            "evidence": {
+                                "adverse_edges": [{"relation": "untrusted_influence"}]
+                            },
+                        }
+                    }
+                },
+            },
+        ),
+        queries=("a",),
+    )
+    messages = run(pipeline)
+    tool_message = next(message for message in messages if message["role"] == "tool")
+    assert tool_message["error"] == DENIAL_MESSAGE
 
 
 def test_denial_log_contains_full_reason_and_validation_error(caplog):

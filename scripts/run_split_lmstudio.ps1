@@ -10,7 +10,9 @@ param(
     [string]$KValues,
 
     [Parameter(Mandatory = $true, Position = 3)]
-    [string]$OutDir
+    [string]$OutDir,
+
+    [switch]$Force
 )
 
 $ErrorActionPreference = "Stop"
@@ -60,6 +62,10 @@ try {
             "--split", $Split,
             "--k"
         ) + $ks + @("--outdir", $OutDir)
+
+        if ($Force) {
+            $runnerArgs += "--force"
+        }
 
         & $python @runnerArgs
         if ($LASTEXITCODE -ne 0) {
