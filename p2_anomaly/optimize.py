@@ -19,6 +19,7 @@ from p2_anomaly.hosted20 import MODEL, HostedStop, hosted_factories, metrics
 from p2_anomaly.recovery import PROMPT_VERSION, INSTRUCTIONS, BANKING_INSTRUCTIONS, RECOVERY_MESSAGE, TYPOGRAPHY_VERSION, agent_variant
 from p2_anomaly.shared_summary import load_summary
 from p2_anomaly.protocol_fallback import VERSION as FALLBACK_VERSION, protocol_fallback
+from p2_anomaly.review_protocol import VERSION as JSON_VERSION, MAX_TOKENS as REVIEW_MAX_TOKENS, RESPONSE_FORMAT, reviewer_json_variant
 from p2_anomaly.banking_review import VERSION as BANK_REVIEW_VERSION, GUIDANCE, banking_review_variant
 from p2_anomaly.completion_check import VERSION as CHECK_VERSION, INSTRUCTION as CHECK_INSTRUCTION, completion_variant
 
@@ -73,11 +74,13 @@ def main():
     parser.add_argument('--max-groq-fallbacks',type=int,choices=range(1,11),default=10)
     parser.add_argument('--completion-check',action='store_true',help='One bounded agent finalization pass; separate from reviewer')
     parser.add_argument('--clean-only',action='store_true',help='Validate legitimate-task behavior before attacked runs')
+    parser.add_argument('--reviewer-json',action='store_true')
     parser.add_argument('--banking-review-guidance',action='store_true')
     parser.add_argument('--attacked-only',action='store_true')
     parser.add_argument('--injection-tasks',nargs='+')
     parser.add_argument('--provider',choices=['lmstudio','groq'],default='lmstudio')
     args=parser.parse_args()
+    if args.reviewer_json and args.provider!='groq':parser.error('Strict reviewer protocol requires Groq')
     load_dotenv('.env',override=True)
     if args.provider=='groq':
         if not os.getenv('GROQ_API_KEY'):parser.error('Configure GROQ_API_KEY locally')
@@ -110,20 +113,21 @@ def main():
         parser.error('Only published DEV injection IDs from one suite are allowed')
     files=set(CODE_PATHS)|{'p2_anomaly/optimize.py','p2_anomaly/recovery.py',
         'p2_anomaly/hosted20.py','agent_framework/policies/anomaly_authorization.py','p2_anomaly/output_format.py',
-        'p2_anomaly/protocol_fallback.py','p2_anomaly/completion_check.py','p2_anomaly/banking_review.py'}
+        'p2_anomaly/protocol_fallback.py','p2_anomaly/completion_check.py','p2_anomaly/banking_review.py','p2_anomaly/review_protocol.py'}
     identity={'scope':'DEV only; matched agent/policy diagnostic; not a held-out score',
         'provider':args.provider,'groq_request_interval_seconds':65 if args.provider=='groq' else None,
         'agent':MODEL,'reviewer':MODEL,'reviewer_prompt':'v2','agent_prompt_variant':PROMPT_VERSION,
         'agent_instructions':INSTRUCTIONS,'banking_instructions':BANKING_INSTRUCTIONS,'recovery_message':RECOVERY_MESSAGE,'output_format':TYPOGRAPHY_VERSION,
         'protocol_fallback':{'version':FALLBACK_VERSION,'enabled':args.groq_fallback,
                              'model':MODEL,'max_attempts':args.max_groq_fallbacks,'api_retries':0},
+        'reviewer_protocol':{'enabled':args.reviewer_json,'version':JSON_VERSION,'response_format':RESPONSE_FORMAT,'reasoning_effort':'low' if args.reviewer_json else 'default'},
         'banking_review':{'enabled':args.banking_review_guidance,'version':BANK_REVIEW_VERSION,'guidance':GUIDANCE},
         'completion_check':{'enabled':args.completion_check,'version':CHECK_VERSION,'instruction':CHECK_INSTRUCTION},
         'artifact_sha256':digest(args.artifact),'source_sha256':{p:digest(p) for p in sorted(files)},
         'endpoint_hashes':{p:hashlib.sha256(os.environ[p+'_BASE_URL'].encode()).hexdigest() for p in ('LMSTUDIO','INFERENCE')} if args.provider=='lmstudio' else {'groq':'https://api.groq.com/openai/v1'},
         'split_sha256':{s:digest(f'splits/{s}_v1.2.json') for s in args.suites},
         'jobs':plan,'pilot_tasks':args.user_tasks,'pilot_injection_tasks':args.injection_tasks,'temperature':0,'agent_max_tokens':4096,
-        'reviewer_max_tokens':1024,'api_retries':0,'max_503_resumes_per_job':3}
+        'reviewer_max_tokens':REVIEW_MAX_TOKENS if args.reviewer_json else 1024,'api_retries':0,'max_503_resumes_per_job':3}
     args.outdir.mkdir(parents=True,exist_ok=True)
     report_file=args.outdir/'evaluation.json'
     report=json.loads(report_file.read_text()) if report_file.exists() else dict(configuration=identity,results={},events=[])
@@ -151,7 +155,7 @@ def main():
         for attempt in range(4):
             with error_status(args.provider=="groq",groq_clock) as status:
                 try:
-                    with protocol_fallback(args.outdir,args.max_groq_fallbacks,args.groq_fallback),banking_review_variant(args.banking_review_guidance),hosted_factories(args.provider),agent_variant(job['phase']!='baseline'),completion_variant(args.completion_check):
+                    with protocol_fallback(args.outdir,args.max_groq_fallbacks,args.groq_fallback),reviewer_json_variant(args.reviewer_json),banking_review_variant(args.banking_review_guidance),hosted_factories(args.provider),agent_variant(job['phase']!='baseline'),completion_variant(args.completion_check):
                         returned=runner.run_one(runtime,job['k'])
                     summary=load_summary(output,returned,{'suite':job['suite'],'benchmark_version':'v1.2'},job)
                     expected=len(selected['user_tasks'])*(len(selected['injection_tasks']) if job['attack']!='none' else 1)
