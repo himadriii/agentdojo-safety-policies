@@ -6,7 +6,7 @@ REQUIRED = {"tool", "args", "decision", "outcome", "executed", "reviewer_called"
 EXECUTED = {"auto_approve", "escalate_approved"}
 bad, checked = [], 0
 
-for f in glob.glob(f"{sys.argv[1]}/*/workspace/*/*/*.json", recursive=True):
+for f in glob.glob(f"{sys.argv[1]}/**/*.json", recursive=True):
     d = json.load(open(f))
     decisions = d.get("approval_decisions")
     if decisions is None:
@@ -44,6 +44,8 @@ for f in glob.glob(f"{sys.argv[1]}/*/workspace/*/*/*.json", recursive=True):
     if "llm" in f and any(x.get("reviewer_called") for x in decisions) and usage.get("reviewer", {}).get("calls", 0) == 0:
         fail("LLM reviewer used but no reviewer tokens recorded")
 
+if not checked:
+    bad.append('no traces checked; check the results directory')
 print(f"checked {checked} traces, {len(bad)} problems")
 print("\n".join(bad))
 sys.exit(1 if bad else 0)

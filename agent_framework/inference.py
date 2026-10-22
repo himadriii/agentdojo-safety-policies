@@ -70,7 +70,16 @@ def _make_compatible(client, provider, response_schema=None):
                 "type": "json_schema",
                 "json_schema": {"name": "policy_evidence", "schema": response_schema},
             }
-        return original(*args, **kwargs)
+        try:
+            return original(*args, **kwargs)
+        except openai.APIStatusError as error:
+            # LM Studio's MLX engine can fail on long prompts ("RotatingKVCache Quantization NYI"); record it as a
+            # task error like a context-length overflow instead of crashing the stage (P6 provider helper).
+            from agent_framework.local_provider import as_context_length_error
+            mapped = as_context_length_error(error) if provider == "lmstudio" else None
+            if mapped is not None:
+                raise mapped from error
+            raise
 
     client.chat.completions.create = create
     return client

@@ -1,0 +1,12 @@
+{
+  "issue": "The upstream agent helper uses temperature or NOT_GIVEN, so zero is omitted. Earlier Groq-native agent requests were not explicitly constrained to zero despite nominal metadata. The reviewer already explicitly passed zero, and the LM Studio adapter already supplied zero; this caveat is specific to affected agent transports.",
+  "helper_sha256": "7f91178cb0bb354b89427650d7b8725d6aff8fe18d43fc85bf4b4fdc1ddf9574",
+  "affected_examples": [
+    "P2-groq20-full-v5-json",
+    "P2-groq20-full-v5-resilient",
+    "P2-groq20-completion-control",
+    "P2-groq20-completion-pilot"
+  ],
+  "correction": "Local requests explicitly normalize omitted temperature to zero; future Groq requests enforce zero in the scoped wrapper. Historical scores are not rewritten or pooled into local evaluation.",
+  "agentdojo_version": "0.1.35"
+}
