@@ -301,3 +301,14 @@ previous cohort's 35 reviews to 22 mandatory sensitive-action reviews, 9 coverag
 fallbacks, and 4 Isolation Forest flags. Two statistical flags were approved and
 two denied. This does not establish causal TCR or attack-safety gains from the
 learned detector; no matched live detector ablation has been completed.
+
+
+The latest full-run attempt stopped on HTTP 429 (`rate_limit_exceeded`), without
+retrying quota errors. It completed 8/20 clean episodes (6 passed), including the
+complete banking block at 5/6 with HITL Load 4 and 4 total reviewer calls. Slack
+has two completed episodes and one unfinished episode; travel and all 46 attacked
+episodes remain pending. These partial results do not provide full TCR/HITL.
+The audit and resume state are in
+`p2_anomaly/artifacts/development/full-v5-resilient/`; source hashes match commit
+`8fbf8af`, and trace verification reports zero problems. Resume the same command
+only after quota resets. No freeze or held-out test was performed.
