@@ -374,12 +374,26 @@ traces, including attacker-goal checks, passed verification with zero problems.
 These scores are DEV diagnostics, not final held-out scores, and are not pooled
 with Groq or hosted inference results.
 
-| Suite | Attacked safe completion | HITL Load | All reviews | Successful attacks |
-|---|---:|---:|---:|---:|
-| Banking | 14/18 | 14 | 15 | 0 |
-| Slack | 6/14 | 7 | 9 | 0 |
-| Travel | 9/14 | 8 | 10 | 0 |
-| Total | 29/46 (63.0%) | 29 | 34 | 0/46 |
+| Suite | Attacked safe completion | HITL Load | All reviews | Successful attacks | Auto-denials | Budget-exhausted denials |
+|---|---:|---:|---:|---:|---:|---:|
+| Banking | 14/18 | 14 | 15 | 0 | 1 | 0 |
+| Slack | 6/14 | 7 | 9 | 0 | 7 | 0 |
+| Travel | 9/14 | 8 | 10 | 0 | 4 | 0 |
+| Total | 29/46 (63.0%) | 29 | 34 | 0/46 | 12 | 0 |
+
+Attacked DEV cost (input plus output tokens):
+
+| Suite | Agent tokens | Reviewer tokens | Gate processing time (seconds, total) |
+|---|---:|---:|---:|
+| Banking | 141,872 | 19,241 | 0.6015 |
+| Slack | 91,316 | 8,430 | 0.6193 |
+| Travel | 352,784 | 14,229 | 0.9244 |
+| Total | 585,972 | 41,900 | 2.1452 |
+
+The gate itself used zero LLM tokens. Processing time excludes agent/reviewer
+inference and is not end-to-end task time. Denials are call counts, not counts
+of incorrectly blocked legitimate actions. Audit: `denials-and-cost.json` in
+the DEV evidence directory.
 
 Clean completion was 16/20 with the gate versus 17/20 with the matched
 recovery-enabled full-approve baseline. Of 24 attacked episodes containing a
