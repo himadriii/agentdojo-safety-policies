@@ -157,3 +157,31 @@ def test_typography_formats_only_final_prose_preserving_urls_code_and_calls():
     assert messages==before
     messages[-1]['tool_calls']=[FunctionCall(function='send_direct_message',args={'body':'raw\u202ftext'})]
     assert format_final(messages) is messages
+
+
+def test_payment_destination_cannot_override_user_supplied_account():
+    c=ctx('send_money',{'recipient':'GB82WEST12345698765432','amount':10},
+          'Please refund GB29NWBK60161331926819 for the payment.')
+    assert authorization_guard(c)[0]=='deny'
+    assert authorization_guard(c,'explicit-intent-v3') is None
+    c['proposed_call'].args['recipient']='GB29NWBK60161331926819'
+    assert authorization_guard(c) is None  # still requires the normal financial review
+
+
+def test_banking_workflow_is_scoped_once_and_cannot_be_triggered_by_tool_text(monkeypatch):
+    from p2_anomaly.recovery import RecoveryAgent, BaseHostedAgent, BANKING_INSTRUCTIONS
+    captured=[]
+    def query(self,query,runtime,env,messages,extra_args):
+        captured.append(messages)
+        return query,runtime,env,messages,extra_args
+    monkeypatch.setattr(BaseHostedAgent,'query',query)
+    agent=RecoveryAgent(SimpleNamespace(),'test')
+    messages=[{'role':'user','content':[T('Refund a historical incoming transfer')]}]
+    bank=SimpleNamespace(functions={'get_most_recent_transactions':None,'send_money':None})
+    result=agent.query('request',bank,messages=messages)
+    assert captured[-1][-1]['content']==[T(BANKING_INSTRUCTIONS)]
+    assert len(messages)==1
+    agent.query('request',bank,messages=result[3])
+    assert len(captured[-1])==2
+    agent.query('request',SimpleNamespace(functions={'get_webpage':None}),messages=messages)
+    assert captured[-1]==messages

@@ -83,20 +83,23 @@ class HostedReviewer(LLMReviewer):
 
 
 @contextmanager
-def hosted_factories():
+def hosted_factories(provider="lmstudio"):
     from agent_framework import runner
     original_agent, original_reviewer = runner.make_inference_llm, runner.REVIEWERS['llm']
+    original_groq = runner.make_groq_llm
     def make_agent(provider, model):
-        if provider != 'lmstudio' or model != MODEL:
+        if provider not in ('lmstudio', 'groq') or model != MODEL:
             raise ValueError('Hosted20 agent configuration changed')
         MODEL_NAMES.setdefault(model, 'AI assistant')
         MODEL_NAMES.setdefault(model.replace('/', '_'), 'AI assistant')
         return HostedAgent(make_inference_client(provider), model)
     runner.make_inference_llm, runner.REVIEWERS['llm'] = make_agent, HostedReviewer
+    runner.make_groq_llm = lambda model: make_agent('groq', model)
     try:
         yield
     finally:
         runner.make_inference_llm, runner.REVIEWERS['llm'] = original_agent, original_reviewer
+        runner.make_groq_llm = original_groq
 
 
 def schedule(budgets):

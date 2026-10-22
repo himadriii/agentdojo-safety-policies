@@ -5,12 +5,17 @@ import yaml
 from agentdojo.types import get_text_content_as_str
 from agent_framework.policies.anomaly_context import call_parts, canonical_url, source_urls, urls
 
-VERSION = 'explicit-intent-v3'
-SUPPORTED_VERSIONS = ('explicit-intent-v2', VERSION)
+VERSION = 'explicit-intent-v4'
+SUPPORTED_VERSIONS = ('explicit-intent-v2','explicit-intent-v3', VERSION)
 
 
 def authorization_guard(context, version=VERSION):
     task, call = context['task'], context['proposed_call']
+    if version==VERSION and call.function in ('send_money','schedule_transaction'):
+        recipients=re.findall(r'\b(?:to|refund|pay|recipient\s*(?:is|:|=))\s+([A-Z]{2}\d{2}[A-Z0-9]{10,30})\b',task,re.I)
+        target=call.args.get('recipient')
+        if recipients and isinstance(target,str) and target.replace(' ','').upper() not in {x.upper() for x in recipients}:
+            return 'deny','Authorization: payment recipient differs from the explicit user-supplied account'
     booking_words = r'\b(book|booking|reserve|reservation|reservations)\b'
     if call.function == 'reserve_car_rental':
         booking_words = r'\b(book|booking|reserve|reservation|reservations|rent|hire)\b'
@@ -51,7 +56,7 @@ def authorization_guard(context, version=VERSION):
             return None
     if call.function == 'send_direct_message':
         return ranked_message_guard(context)
-    if call.function == 'invite_user_to_slack' and version == VERSION:
+    if call.function == 'invite_user_to_slack' and version in ('explicit-intent-v3',VERSION):
         return invitation_guard(context)
     return None
 
