@@ -2,6 +2,9 @@
 
 Run from the repo root:  python -m pytest test -q
 """
+import logging
+from types import SimpleNamespace
+
 from agentdojo.agent_pipeline.agent_pipeline import AgentPipeline
 from agentdojo.agent_pipeline.base_pipeline_element import BasePipelineElement
 from agentdojo.agent_pipeline.basic_elements import InitQuery, SystemMessage
@@ -12,9 +15,13 @@ from agentdojo.types import ChatAssistantMessage, text_content_block_from_string
 from agent_framework.budget import EscalationBudget
 from agent_framework.policy import FullEscalatePolicy, Policy
 from agent_framework.reviewer import MockReviewer
-from agent_framework.tools_executor import DENIAL_MESSAGE, P1ToolsExecutor, ResetTaskState
+from agent_framework.tools_executor import (
+    DENIAL_MESSAGE,
+    P1ToolsExecutor,
+    ResetTaskState,
+    describe_tool_effects,
+)
 from agent_framework.tool_meta import get_tool_meta
-
 
 EXECUTED = []
 
@@ -107,9 +114,29 @@ def test_policy_receives_documented_context():
     pipeline, _ = build(Recording(), queries=("a",))
     run(pipeline, task="Find my emails.")
     ctx = seen[0]
-    assert set(ctx) == {"task", "proposed_call", "environment", "trajectory", "remaining_budget", "metadata", "tools"}
+    assert set(ctx) == {
+        "task", "proposed_call", "environment", "trajectory",
+        "remaining_budget", "metadata", "tool_effects", "tools",
+    }
     assert ctx["task"] == "Find my emails."
     assert ctx["remaining_budget"] == 2
+    assert ctx["tool_effects"]["non_mutating_read"] is True
+
+
+def test_effect_metadata_is_conservative_about_read_side_effects():
+    read = SimpleNamespace(
+        name="lookup_records", description="Returns records matching the query."
+    )
+    mark_read = SimpleNamespace(
+        name="fetch_messages",
+        description="Returns unread messages. They are marked as read after this function is called.",
+    )
+    unknown = SimpleNamespace(name="process", description="Process the input.")
+
+    assert describe_tool_effects(read)["effects"] == ["read"]
+    assert describe_tool_effects(mark_read)["effects"] == ["read", "state_change"]
+    assert describe_tool_effects(mark_read)["non_mutating_read"] is False
+    assert describe_tool_effects(unknown)["effects"] == ["unknown"]
 
 
 def test_auto_deny_blocks_execution_and_returns_feedback():
@@ -120,6 +147,52 @@ def test_auto_deny_blocks_execution_and_returns_feedback():
     assert len(tool_msgs) == 2
     assert all(m["error"] == DENIAL_MESSAGE for m in tool_msgs)
     assert outcomes(executor) == ["auto_deny", "auto_deny"]
+
+
+def test_denial_log_contains_full_reason_and_validation_error(caplog):
+    validation_error = {
+        "edge_index": 0,
+        "edge": {"relation": "authorizes", "confidence": "very high"},
+        "error_type": "ValueError",
+        "error": "LLM confidence is not numeric",
+    }
+    pipeline, _ = build(
+        Fixed(
+            "deny",
+            {
+                "reason": "invalid provenance evidence",
+                "validation_errors": [validation_error],
+            },
+        ),
+        queries=("a",),
+    )
+
+    run(pipeline)
+
+    assert "decision=deny outcome=auto_deny" in caplog.text
+    assert "reason=invalid provenance evidence" in caplog.text
+    assert '"confidence": "very high"' in caplog.text
+    assert "LLM confidence is not numeric" in caplog.text
+
+
+def test_executor_records_and_logs_structured_evidence(caplog):
+    caplog.set_level(logging.INFO)
+    evidence = {
+        "authorization_edges": [
+            {"source_id": "trajectory:1", "supporting_span": "Find my emails"}
+        ],
+        "argument_provenance": [],
+    }
+    pipeline, executor = build(
+        Fixed("approve", {"reason": "authorized", "evidence": evidence}),
+        queries=("a",),
+    )
+
+    run(pipeline)
+
+    assert executor.decisions[0]["evidence"] == evidence
+    assert "[P1:EVIDENCE]" in caplog.text
+    assert '"supporting_span": "Find my emails"' in caplog.text
 
 
 def test_budget_exhaustion_denies_without_calling_reviewer():

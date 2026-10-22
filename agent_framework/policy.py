@@ -10,6 +10,7 @@ class PolicyContext(TypedDict):
     trajectory: Any         # messages so far (system, user, assistant, tool)
     remaining_budget: int   # escalations left for this task
     metadata: dict          # pipeline extra_args
+    tool_effects: dict      # effects inferred from the runtime tool contract
 
 
 class Policy:

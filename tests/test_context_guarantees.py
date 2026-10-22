@@ -15,7 +15,7 @@ def test_context_has_documented_keys_and_isolated_fields():
     pipeline, _ = build(Probe(), queries=("a", "b"))
     messages = run(pipeline)
     assert set(seen[0]) == {"task", "proposed_call", "environment", "trajectory",
-                            "remaining_budget", "metadata", "tools"}
+                            "remaining_budget", "metadata", "tools", "tool_effects"}
     assert "search_emails" in seen[0]["tools"]
     assert "description" in seen[0]["tools"]["search_emails"]
     assert set(seen[0]["metadata"]) >= {"step", "decision_history", "tool"}
