@@ -409,3 +409,24 @@ Evidence is in `p2_anomaly/artifacts/development/local20-full-v1/`.
 The team-confirmed profile, unchanged anomaly model and provenance are frozen in
 `p2_anomaly/artifacts/frozen/local20-v1/`, tag `freeze-p2-local20-v1`.
 Final held-out evaluation uses this fixed profile at budgets 0/1/2/3/5.
+
+### Team integration and submission status
+
+The isolated P2 integration branch merges main at `a2f3c1c` and preserves main's
+runner, executor and provider implementations. The merged tree passes all 391
+tests after updating a stale provenance-schema test assertion to match the
+structured object-or-null schema already on main.
+
+Shareable DEV summaries and audits are in
+`submitted_results/dev/P2-local20-v1/`. These describe the pre-merge local cohort;
+they are not post-merge or updated-reviewer scores. The complete local DEV JSON
+trace archive is `results/handoff/P2-local20-full-v1-dev.zip` (not committed).
+
+The pre-merge frozen held-out run stopped after two completed jobs when the
+agent exhausted its bounded reasoning-only continuations on the travel clean
+job at k=0. Its completed results remain saved; no final aggregate is claimed.
+The model was unloaded after stopping. No exposed API key was used. Switching
+provider or adopting the upcoming shared reviewer requires a separately labelled
+cohort; do not pool with this partial frozen run. Existing held-out exposure
+remains recorded. Combined-gate candidates must be coordinated with the group
+and selected using DEV evidence.

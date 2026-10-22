@@ -18,7 +18,12 @@ def test_provenance_uses_selected_model_and_current_schema(monkeypatch, provider
         if "response_format" in payload:
             if provider == "lmstudio":
                 schema = payload["response_format"]["json_schema"]["schema"]
-                assert schema["properties"]["edges"]["items"]["properties"]["transformation"]["type"] == ["object", "null"]
+                transformation = schema["properties"]["edges"]["items"]["properties"]["transformation"]
+                alternatives = transformation["anyOf"]
+                assert {option["type"] for option in alternatives} == {"object", "null"}
+                structured = next(option for option in alternatives if option["type"] == "object")
+                assert "operation" in structured["required"]
+                assert "copy" in structured["properties"]["operation"]["enum"]
             return completion({"role": "assistant", "content": '{"edges": []}'})
         return completion(tool_message() if len(requests) == 1 else {"role": "assistant", "content": "Done"})
 
