@@ -45,7 +45,8 @@ OUTPUT_GUIDANCE = (
 def agent_system_message() -> str:
     return f"{load_system_message(None).rstrip()}\n  - {OUTPUT_GUIDANCE}"
 
-def build_pipeline(llm_name, policy_name, reviewer_name, k, provider="openai", reviewer_model=None):
+def build_pipeline(llm_name, policy_name, reviewer_name, k, provider="openai", reviewer_model=None,
+                   shadow_audit=False):
     if not llm_name or not llm_name.strip():
         raise ValueError("llm_name must not be blank")
     if provider == "groq":

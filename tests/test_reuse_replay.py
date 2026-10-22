@@ -108,7 +108,7 @@ def test_labels_never_reach_the_policy():
     assert Recording.seen
     for ctx in Recording.seen:
         assert set(ctx) == {"task", "proposed_call", "environment", "trajectory", "remaining_budget", "metadata",
-                            "tools"}
+                            "tools", "tool_effects"}
         assert set(ctx["metadata"]) == {"step", "decision_history", "tool"}   # no benchmark labels
         assert "injection" not in json.dumps([dict(c.args) for c in [ctx["proposed_call"]]])
 
