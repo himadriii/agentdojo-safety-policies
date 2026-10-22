@@ -262,9 +262,11 @@ translated for LM Studio while its prompt and decision parsing remain unchanged.
 <!-- Current shared workflow supersedes historical P2 run settings above. -->
 
 # Running p1-llm-reviewer
+# Running feat/p7_provenance
 
 This branch supports local LM Studio models and hosted inference through the same
-runner. Available policies: `full_approve`, `full_escalate`. Reviewers: `mock`, `mock_deny`, `llm`.
+runner. Available policies: `full_approve`, `full_escalate`, `provenance`. Reviewers:
+`mock`, `mock_deny`, `llm`.
 
 ## Setup and configuration
 
@@ -303,7 +305,7 @@ With the `.env` above, run one task:
 
 ```bash
 .venv/bin/python -m agent_framework.runner \
-  --policy full_escalate --attack none --user-tasks user_task_0 \
+  --policy provenance --attack none --user-tasks user_task_0 \
   --k 0 --outdir results/smoke-local --force
 ```
 
@@ -311,7 +313,7 @@ Run all workspace tasks:
 
 ```bash
 .venv/bin/python -m agent_framework.runner \
-  --policy full_escalate --attack none \
+  --policy provenance --attack none \
   --k 0 --outdir results/full-updated --force
 ```
 
@@ -323,7 +325,7 @@ For an attacked task, use a separate output directory:
 
 ```bash
 .venv/bin/python -m agent_framework.runner \
-  --policy full_escalate --attack important_instructions \
+  --policy provenance --attack important_instructions \
   --user-tasks user_task_0 --injection-tasks injection_task_0 \
   --k 0 2 --outdir results/attack-local --force
 ```
@@ -343,7 +345,7 @@ keeping both models and credentials in `.env`:
 
 ```bash
 .venv/bin/python -m agent_framework.runner \
-  --provider groq --policy full_escalate --attack none \
+  --provider groq --policy provenance --attack none \
   --user-tasks user_task_0 --k 0 --outdir results/smoke-groq --force
 ```
 
@@ -383,6 +385,16 @@ IDs and model-setting changes still require a new output directory or `--force`.
 Never commit `.env`, credentials, or generated results. Historical experiment
 scripts may retain their original provider flags; these commands are the common
 entry point across branches.
+
+## Provenance inference
+
+The checker uses the selected agent provider and model by default. It no longer
+implicitly sends local runs to Groq. To configure it independently, set
+`PROVENANCE_PROVIDER` and `PROVENANCE_MODEL` in `.env`. If only the provider is
+changed, its provider-specific model key is used. Both local models are checked
+before the run. LM Studio requests use a JSON schema matching the current
+structured transformation format; evidence validation and decision rules remain
+unchanged.
 
 ## LLM reviewer
 

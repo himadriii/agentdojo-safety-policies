@@ -49,6 +49,11 @@ python -m agent_framework.runner --provider groq --policy full_approve \
     --k 0 --outdir results/smoke
 ```
 
+To run P4's deterministic plan-consistency baseline, replace `full_approve`
+with `plan_consistency`. The policy uses the user task, proposed tool call,
+and prior assistant tool calls; it does not depend on the selected agent model.
+P4 implementation notes and limitations: [`docs/plan_consistency.md`](docs/plan_consistency.md).
+
 The last line prints `TCR` and `HITL`. A single task is noisy, so use it only to check that your setup works. The model is a placeholder and may change; do not make policies depend on it.
 
 ## P2 anomaly gate
