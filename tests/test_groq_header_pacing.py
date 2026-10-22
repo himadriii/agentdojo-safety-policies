@@ -52,3 +52,40 @@ def test_missing_headers_keeps_conservative_fallback():
     pacer,clock,waits=setup()
     pacer.observe(httpx.Response(200))
     assert pacer.limit==8000 and pacer.remaining==8000
+
+
+def limit_error(message,delay='3'):
+    return openai.RateLimitError(message,response=httpx.Response(429,
+        request=httpx.Request('POST','https://api.groq.com/openai/v1/chat/completions'),
+        headers={'retry-after':delay}),body={'message':message})
+
+
+def test_minute_limit_retries_same_request_after_server_wait():
+    pacer,clock,waits=setup();calls=[]
+    error=limit_error('Tokens per minute (TPM): Limit 8000, Used 7000, Requested 2000')
+    def request(**kwargs):
+        calls.append(kwargs)
+        if len(calls)==1:raise error
+        return 'ok'
+    assert pacer.call(request,messages=[],max_tokens=100)=='ok'
+    assert calls[0]==calls[1]
+    assert waits==[3.5]
+
+
+@pytest.mark.parametrize('message',[
+    'Tokens per day (TPD) exhausted', 'Requests per day (RPD) exhausted',
+    'Rate limit exceeded', 'Tokens per minute (TPM): Limit 8000, Requested 9000'])
+def test_daily_unknown_or_oversized_limits_do_not_retry(message):
+    pacer,clock,waits=setup();calls=[]
+    def request(**kwargs):
+        calls.append(kwargs);raise limit_error(message)
+    with pytest.raises(openai.RateLimitError):pacer.call(request,messages=[],max_tokens=100)
+    assert len(calls)==1 and waits==[]
+
+
+def test_repeated_minute_limit_has_bounded_attempts():
+    pacer,clock,waits=setup();calls=[]
+    def request(**kwargs):
+        calls.append(kwargs);raise limit_error('Requests per minute (RPM) exhausted')
+    with pytest.raises(openai.RateLimitError):pacer.call(request,messages=[],max_tokens=100)
+    assert len(calls)==4

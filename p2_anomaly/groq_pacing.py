@@ -1,12 +1,14 @@
-"""Shared serial pacing using Groq response headers; never retries a 429."""
+"""Shared Groq pacing; bounded minute-limit waits, immediate daily-quota stop."""
 import json
+import os
+import re
 from pathlib import Path
 import time
 
 import httpx
 import openai
 
-VERSION = 'groq-header-pacing-v1'
+VERSION = 'groq-header-pacing-v2'
 
 
 class GroqPacer:
@@ -24,6 +26,26 @@ class GroqPacer:
             with self.journal.open('a') as file:
                 file.write(json.dumps(record,sort_keys=True)+'\n')
 
+    def call(self, request, *args, **options):
+        for attempt in range(4):
+            self.before(options)
+            try:
+                return request(*args, **options)
+            except openai.APIError as error:
+                body = getattr(error,'body',None)
+                detail = body.get('error',body) if isinstance(body,dict) else {}
+                message = str(detail.get('message',str(error))) if isinstance(detail,dict) else str(error)
+                key = os.getenv('GROQ_API_KEY')
+                if key: message = message.replace(key,'[REDACTED]')
+                delay = minute_retry_delay(error,message)
+                self.log({'event':'api_error','status':getattr(error,'status_code',None),
+                    'attempt':attempt+1,'message':message[:1500],
+                    'minute_retry_seconds':delay})
+                if delay is None or attempt == 3:
+                    raise
+                print(f'Groq minute limit: waiting {delay:.1f}s, then retrying the same API request',flush=True)
+                self.sleep(delay)
+
     def observe(self, response):
         headers = response.headers
         try:
@@ -40,7 +62,8 @@ class GroqPacer:
             pass
         self.log({'event':'response','status':response.status_code,
             'token_limit':self.limit,'tokens_remaining':self.remaining,
-            'daily_requests_remaining':self.daily_remaining})
+            'daily_requests_remaining':self.daily_remaining,
+            'retry_after':headers.get('retry-after')})
 
     def before(self, options):
         if self.daily_remaining == 0:
@@ -66,3 +89,21 @@ class GroqPacer:
         self.updated = self.last_request = current
         self.log({'event':'request','estimated_reserved_tokens':round(needed),
                   'wait_seconds':round(delay,3)})
+
+
+def minute_retry_delay(error, message):
+    """Only explicitly identified, recoverable RPM/TPM limits may be retried."""
+    if not isinstance(error,openai.RateLimitError):return None
+    text=message.lower()
+    if any(marker in text for marker in ('(tpd)','(rpd)','per day','daily')):return None
+    if not any(marker in text for marker in ('(tpm)','(rpm)','tokens per minute','requests per minute')):
+        return None
+    sizes=re.search(r'limit\s*:?\s*([\d,]+).*?requested\s*:?\s*([\d,]+)',text)
+    if sizes and int(sizes[2].replace(',',''))>int(sizes[1].replace(',','')):
+        return None  # This request cannot fit; waiting would not help.
+    try:delay=float(error.response.headers['retry-after'])
+    except (KeyError,TypeError,ValueError):
+        match=re.search(r'try again in ([\d.hms ]+)',text)
+        units={'ms':0.001,'s':1,'m':60,'h':3600}
+        delay=sum(float(n)*units[unit] for n,unit in re.findall(r'(\d+(?:\.\d+)?)(ms|s|m|h)',match[1])) if match else 60
+    return max(1,delay+0.5) if 0<=delay<=120 else None

@@ -439,9 +439,12 @@ with the earlier interrupted local run. Hosted transport checks pass all 549 tes
 Groq comparisons use `--provider groq --env-file /path/to/private/.env` and a new
 output directory. All three roles use GPT-OSS-20B with explicit temperature zero,
 shared response-header token pacing, a 2.1-second minimum request interval,
-zero SDK retries and immediate stop at quota. Token estimates reserve the
+zero SDK retries and immediate stop at daily, unknown or oversized limits.
+Explicit per-minute 429s retry the same API request up to three times using
+the server's wait (maximum 120.5 seconds); no whole-task outcome is resampled.
+Token estimates reserve the
 requested output allowance; real prompts/output limits are never shortened.
-No LM Studio/local traces are imported. The full suite passes 555 tests with
+No LM Studio/local traces are imported. The full suite passes 561 tests with
 this backend. The 138-case plan may require multiple free-quota resets.
 
 The isolated P2 integration branch merges main at `a2f3c1c` and preserves main's

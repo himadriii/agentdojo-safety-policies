@@ -80,7 +80,10 @@ def test_groq_backend_pins_provider_and_shares_pacing_clock(monkeypatch):
     monkeypatch.setattr(inference,'make_inference_client',make)
     old_runner=runner.make_inference_client
     old_agent=hosted20.make_inference_client
-    pacer=SimpleNamespace(before=lambda options:observed.append(options),observe=lambda response:None)
+    def paced_call(request,*args,**options):
+        observed.append(options)
+        return request(*args,**options)
+    pacer=SimpleNamespace(call=paced_call,observe=lambda response:None)
     with groq_clients(pacer):
         assert runner.make_inference_client('groq') is client
         client.chat.completions.create(model='openai/gpt-oss-20b')

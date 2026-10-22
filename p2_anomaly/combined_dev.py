@@ -41,8 +41,7 @@ def groq_clients(pacer):
         def create(*args, **options):
             options['temperature'] = 0
             options.setdefault('max_tokens',4096)
-            pacer.before(options)
-            return original(*args, **options)
+            return pacer.call(original,*args, **options)
         client.chat.completions.create = create
         clients.append(client)
         return client
@@ -181,7 +180,8 @@ def main():
                {'provider':'groq','base_url':'https://api.groq.com/openai/v1','model':MODEL,
                 'api_retries':0,'pacing_version':PACING_VERSION,'minimum_request_interval_seconds':2.1,'agent_max_tokens':4096,
                 'policy_max_tokens':2048,'reviewer_max_tokens':2048,'temperature':0,
-                'no_cloud_fallback':True,'quota_policy':'free tier only; stop on quota'}
+                'no_cloud_fallback':True,'quota_policy':'free tier only; stop on daily or unknown limits',
+                'minute_limit_retries':3,'maximum_minute_retry_wait_seconds':120.5}
                if args.provider == 'groq' else hosted_identity(args.base_url))
     sources = set(CODE_PATHS) | {str(x.relative_to(ROOT)) for folder in ('agent_framework','p2_anomaly')
                               for x in (ROOT/folder).rglob('*.py') if 'artifacts' not in x.parts}
