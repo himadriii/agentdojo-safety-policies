@@ -45,7 +45,8 @@ OUTPUT_GUIDANCE = (
 def agent_system_message() -> str:
     return f"{load_system_message(None).rstrip()}\n  - {OUTPUT_GUIDANCE}"
 
-def build_pipeline(llm_name, policy_name, reviewer_name, k, provider="openai", reviewer_model=None):
+def build_pipeline(llm_name, policy_name, reviewer_name, k, provider="openai", reviewer_model=None,
+                   shadow_audit=False):
     if not llm_name or not llm_name.strip():
         raise ValueError("llm_name must not be blank")
     if provider == "groq":
@@ -79,7 +80,11 @@ def build_pipeline(llm_name, policy_name, reviewer_name, k, provider="openai", r
         inference_config["reviewer"] = {"provider": reviewer_provider, "model": reviewer_model}
     else:
         reviewer = REVIEWERS[reviewer_name]()
-    executor = P1ToolsExecutor(
+    executor_cls = P1ToolsExecutor
+    if shadow_audit:   # P6 evaluation harness: also asks the reviewer about every reuse approval, never enforced
+        from p6_reuse.shadow import ShadowAuditExecutor
+        executor_cls = ShadowAuditExecutor
+    executor = executor_cls(
         policy=policy, reviewer=reviewer, budget=EscalationBudget(limit=k),
     )
     pipeline = AgentPipeline([
@@ -122,7 +127,8 @@ def run_with_resume(fn, max_wait_s=900, max_tries=6):
 
 def run_one(args, k):
     logdir = Path(args.outdir)
-    pipeline = build_pipeline(args.llm, args.policy, args.reviewer, k, args.provider, args.reviewer_model)
+    pipeline = build_pipeline(args.llm, args.policy, args.reviewer, k, args.provider, args.reviewer_model,
+                              args.shadow_audit)
     suite = get_suite(args.benchmark_version, args.suite)
     user_tasks = args.user_tasks or None
 
@@ -225,6 +231,8 @@ def main():
     p.add_argument("--injection-tasks", nargs="*")
     p.add_argument("--outdir", default="results")
     p.add_argument("--force", action="store_true")
+    p.add_argument("--shadow-audit", action="store_true",
+                   help="log what the reviewer would say about every reuse approval (never enforced)")
     p.add_argument("--split-file", default=None, help="Run the shared comparison set from a split file")
     p.add_argument("--split", choices=["dev", "heldout"], default="dev")
     args = p.parse_args()
