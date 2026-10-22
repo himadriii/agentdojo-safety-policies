@@ -20,14 +20,14 @@ from p2_anomaly.recovery import agent_variant
 from p2_anomaly.review_protocol import reviewer_json_variant
 from p2_anomaly.banking_review import banking_review_variant
 from p2_anomaly.shared_summary import load_summary
-from p2_anomaly.optimize import error_status
+from p2_anomaly.groq_pacing import GroqPacer, VERSION as PACING_VERSION
 
 ROOT = Path(__file__).resolve().parents[1]
 POLICIES = ('anomaly_provenance', 'anomaly', 'provenance')
 
 
 @contextmanager
-def groq_clients(clock):
+def groq_clients(pacer):
     from agent_framework import runner, inference
     from p2_anomaly import hosted20
     originals = runner.make_inference_client, hosted20.make_inference_client
@@ -36,12 +36,19 @@ def groq_clients(clock):
         if provider != 'groq':
             raise ValueError('Matched Groq runs cannot change provider')
         client = inference.make_inference_client('groq', **kwargs)
+        client._client.event_hooks.setdefault('response', []).append(pacer.observe)
+        original = client.chat.completions.create
+        def create(*args, **options):
+            options['temperature'] = 0
+            options.setdefault('max_tokens',4096)
+            pacer.before(options)
+            return original(*args, **options)
+        client.chat.completions.create = create
         clients.append(client)
         return client
     runner.make_inference_client = hosted20.make_inference_client = factory
     try:
-        with error_status(groq=True, clock_state=clock):
-            yield
+        yield
     finally:
         runner.make_inference_client, hosted20.make_inference_client = originals
         for client in clients:
@@ -172,7 +179,7 @@ def main():
         p.error('A valid explicit anomaly artifact is required')
     runtime = (runtime_identity() if args.provider == 'ollama' else
                {'provider':'groq','base_url':'https://api.groq.com/openai/v1','model':MODEL,
-                'api_retries':0,'request_interval_seconds':65,'agent_max_tokens':4096,
+                'api_retries':0,'pacing_version':PACING_VERSION,'minimum_request_interval_seconds':2.1,'agent_max_tokens':4096,
                 'policy_max_tokens':2048,'reviewer_max_tokens':2048,'temperature':0,
                 'no_cloud_fallback':True,'quota_policy':'free tier only; stop on quota'}
                if args.provider == 'groq' else hosted_identity(args.base_url))
@@ -194,7 +201,7 @@ def main():
     if report['configuration'] != identity:
         p.error('Configuration changed; keep the original run separate')
     report['status'] = 'running matched DEV comparison'; save(report_path,report)
-    clock = [None]
+    pacer = GroqPacer(outdir/'groq-rate-limits.jsonl')
     try:
         for job in plan:
             name = '{policy}-{suite}-{attack}-k{k}'.format(**job)
@@ -211,7 +218,7 @@ def main():
                 outdir=str(output),force=False,shadow_audit=False)
             print('Starting matched DEV '+name,flush=True)
             backend = (local_factories(True,outdir,runtime) if args.provider == 'ollama'
-                       else groq_clients(clock) if args.provider == 'groq' else hosted_clients(args.base_url))
+                       else groq_clients(pacer) if args.provider == 'groq' else hosted_clients(args.base_url))
             with backend, policy_clients(), reviewer_json_variant(True,allowed_base_url=args.base_url if args.provider=='lmstudio' else None), banking_review_variant(True), hosted_factories(provider), agent_variant(True):
                 result = runner.run_one(run_args,2)
             summary = load_summary(output,result,{'suite':job['suite'],'benchmark_version':'v1.2'},job)

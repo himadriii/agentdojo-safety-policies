@@ -69,27 +69,24 @@ def test_hosted_url_rejects_embedded_credentials(url):
 
 
 def test_groq_backend_pins_provider_and_shares_pacing_clock(monkeypatch):
-    from contextlib import contextmanager
     from agent_framework import inference
-    from p2_anomaly import combined_dev, hosted20
+    from p2_anomaly import hosted20
     requests=[]; closed=[]; observed=[]
-    client=SimpleNamespace(close=lambda:closed.append(True))
+    client=SimpleNamespace(close=lambda:closed.append(True),_client=SimpleNamespace(event_hooks={}),
+        chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **k:k)))
     def make(provider, **kwargs):
         requests.append(provider)
         return client
-    @contextmanager
-    def paced(*, groq, clock_state):
-        observed.append((groq,clock_state))
-        yield {}
     monkeypatch.setattr(inference,'make_inference_client',make)
-    monkeypatch.setattr(combined_dev,'error_status',paced)
     old_runner=runner.make_inference_client
     old_agent=hosted20.make_inference_client
-    clock=[None]
-    with groq_clients(clock):
+    pacer=SimpleNamespace(before=lambda options:observed.append(options),observe=lambda response:None)
+    with groq_clients(pacer):
         assert runner.make_inference_client('groq') is client
+        client.chat.completions.create(model='openai/gpt-oss-20b')
         with pytest.raises(ValueError):runner.make_inference_client('compatible')
     assert requests==['groq'] and closed==[True]
-    assert observed==[(True,clock)]
+    assert observed[0]['temperature']==0 and observed[0]['max_tokens']==4096
+    assert client._client.event_hooks['response']==[pacer.observe]
     assert runner.make_inference_client is old_runner
     assert hosted20.make_inference_client is old_agent

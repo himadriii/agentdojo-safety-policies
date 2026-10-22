@@ -438,8 +438,10 @@ with the earlier interrupted local run. Hosted transport checks pass all 549 tes
 
 Groq comparisons use `--provider groq --env-file /path/to/private/.env` and a new
 output directory. All three roles use GPT-OSS-20B with explicit temperature zero,
-65-second shared request pacing, zero SDK retries and immediate stop at quota.
-No LM Studio/local traces are imported. The full suite passes 550 tests with
+shared response-header token pacing, a 2.1-second minimum request interval,
+zero SDK retries and immediate stop at quota. Token estimates reserve the
+requested output allowance; real prompts/output limits are never shortened.
+No LM Studio/local traces are imported. The full suite passes 555 tests with
 this backend. The 138-case plan may require multiple free-quota resets.
 
 The isolated P2 integration branch merges main at `a2f3c1c` and preserves main's
