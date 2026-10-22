@@ -193,6 +193,7 @@ class P1ToolsExecutor(ToolsExecutor):
                 "executed": approved,
                 "reviewer_called": reviewer_called,
                 "reviewer_reason": self._reviewer_reason if reviewer_called else None,
+                "reviewer_evidence": getattr(self.reviewer, "last_evidence_log", None) if reviewer_called else None,
                 "budget_remaining": self.budget.remaining,
                 "reason": info.get("reason"),
                 "scores": info.get("scores"),
@@ -252,7 +253,9 @@ class P1ToolsExecutor(ToolsExecutor):
             if not self.budget.consume():
                 return "budget_exhausted_deny", False, False
             reviewer_context = build_reviewer_context(
-                context["task"], context["proposed_call"], context["trajectory"], info.get("reason")
+                context["task"], context["proposed_call"], context["trajectory"], info.get("reason"),
+                evidence=info.get("reviewer_evidence"),
+                tool_description=context["tools"].get(context["proposed_call"].function, {}).get("description"),
             )
             approved = self.reviewer.review(reviewer_context) == "approve"
             self._reviewer_reason = getattr(self.reviewer, "last_reason", None)

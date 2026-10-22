@@ -237,7 +237,8 @@ def test_reviewer_sees_task_call_trajectory_but_no_environment():
 
     pipeline, _ = build(FullEscalatePolicy(), k=1, reviewer=Recording(), queries=("a",))
     run(pipeline, task="Find my emails.")
-    assert set(seen[0]) == {"task", "proposed_call", "trajectory", "policy_reason"}
+    assert set(seen[0]) == {"task", "proposed_call", "trajectory", "policy_reason",
+                            "evidence", "tool_description"}
     assert seen[0]["task"] == "Find my emails."
     assert seen[0]["proposed_call"].function == "search_emails"
 

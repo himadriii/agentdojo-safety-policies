@@ -32,7 +32,8 @@ from agent_framework.inference import (
 from agent_framework.runner_config import load_runner_env, validate_inference_args
 from agent_framework.policies.provenance_gate.extractor import PROVENANCE_SCHEMA
 from agent_framework.registry import POLICIES, REVIEWERS
-from agent_framework.llm_reviewer import REVIEWER_PROMPT_VERSION
+# from agent_framework.llm_reviewer import REVIEWER_PROMPT_VERSION
+from agent_framework.llm_reviewer import prompt_tag
 
 OUTPUT_GUIDANCE = (
     "When the user requests an exact output format, return the requested value "
@@ -97,7 +98,8 @@ def build_pipeline(llm_name, policy_name, reviewer_name, k, provider="openai", r
     # Separate local and hosted results, including policy/reviewer model overrides.
     pipeline.inference_config = inference_config
     config_key = hashlib.sha256(json.dumps(inference_config, sort_keys=True).encode()).hexdigest()[:10]
-    reviewer_tag = f"{reviewer_name}{REVIEWER_PROMPT_VERSION}" if reviewer_name == "llm" else reviewer_name
+    # reviewer_tag = f"{reviewer_name}{REVIEWER_PROMPT_VERSION}" if reviewer_name == "llm" else reviewer_name
+    reviewer_tag = f"{reviewer_name}{prompt_tag()}" if reviewer_name in ("llm", "local_llm") else reviewer_name
     pipeline.name = (
         f"{provider}-{llm_name}-{policy_name}-{reviewer_tag}-k{k}-{config_key}"
     ).replace("/", "_")
