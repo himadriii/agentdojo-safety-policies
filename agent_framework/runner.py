@@ -187,6 +187,8 @@ def run_one(args, k):
         "tcr": sum(r["completed_safely"] for r in rows.values()) / n,
         "hitl_load_completed": sum(r["escalations"] for r in rows.values() if r["completed_safely"]),
         "hitl_load_all": sum(r["escalations"] for r in rows.values()),
+        "auto_denials": sum(r["auto_denials"] for r in rows.values()),
+        "budget_exhausted_denials": sum(r["budget_exhausted_denials"] for r in rows.values()),
         "tasks_with_errors": sum(r["error"] is not None for r in rows.values()),
         "gate_decisions": gate_decisions,
         "rejections": rejections,
