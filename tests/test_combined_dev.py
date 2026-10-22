@@ -6,7 +6,7 @@ import pytest
 
 from agent_framework import runner
 from agent_framework.policies import anomaly_provenance
-from p2_anomaly.combined_dev import policy_clients, EvaluationStop, hosted_clients, hosted_identity
+from p2_anomaly.combined_dev import policy_clients, EvaluationStop, hosted_clients, hosted_identity, groq_clients
 
 
 def test_policy_transport_schema_limit_and_restore(monkeypatch):
@@ -66,3 +66,30 @@ def test_hosted_transport_pins_endpoint_and_disables_retries(monkeypatch):
 def test_hosted_url_rejects_embedded_credentials(url):
     with pytest.raises(ValueError):
         hosted_identity(url)
+
+
+def test_groq_backend_pins_provider_and_shares_pacing_clock(monkeypatch):
+    from contextlib import contextmanager
+    from agent_framework import inference
+    from p2_anomaly import combined_dev, hosted20
+    requests=[]; closed=[]; observed=[]
+    client=SimpleNamespace(close=lambda:closed.append(True))
+    def make(provider, **kwargs):
+        requests.append(provider)
+        return client
+    @contextmanager
+    def paced(*, groq, clock_state):
+        observed.append((groq,clock_state))
+        yield {}
+    monkeypatch.setattr(inference,'make_inference_client',make)
+    monkeypatch.setattr(combined_dev,'error_status',paced)
+    old_runner=runner.make_inference_client
+    old_agent=hosted20.make_inference_client
+    clock=[None]
+    with groq_clients(clock):
+        assert runner.make_inference_client('groq') is client
+        with pytest.raises(ValueError):runner.make_inference_client('compatible')
+    assert requests==['groq'] and closed==[True]
+    assert observed==[(True,clock)]
+    assert runner.make_inference_client is old_runner
+    assert hosted20.make_inference_client is old_agent

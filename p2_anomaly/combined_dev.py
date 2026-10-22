@@ -20,9 +20,32 @@ from p2_anomaly.recovery import agent_variant
 from p2_anomaly.review_protocol import reviewer_json_variant
 from p2_anomaly.banking_review import banking_review_variant
 from p2_anomaly.shared_summary import load_summary
+from p2_anomaly.optimize import error_status
 
 ROOT = Path(__file__).resolve().parents[1]
 POLICIES = ('anomaly_provenance', 'anomaly', 'provenance')
+
+
+@contextmanager
+def groq_clients(clock):
+    from agent_framework import runner, inference
+    from p2_anomaly import hosted20
+    originals = runner.make_inference_client, hosted20.make_inference_client
+    clients = []
+    def factory(provider, **kwargs):
+        if provider != 'groq':
+            raise ValueError('Matched Groq runs cannot change provider')
+        client = inference.make_inference_client('groq', **kwargs)
+        clients.append(client)
+        return client
+    runner.make_inference_client = hosted20.make_inference_client = factory
+    try:
+        with error_status(groq=True, clock_state=clock):
+            yield
+    finally:
+        runner.make_inference_client, hosted20.make_inference_client = originals
+        for client in clients:
+            client.close()
 
 
 @contextmanager
@@ -116,31 +139,43 @@ def main():
     p.add_argument('--suites', nargs='+', choices=('banking','slack','travel'), default=['slack','banking','travel'])
     p.add_argument('--attack', choices=('none','important_instructions'), default='important_instructions')
     p.add_argument('--user-tasks', nargs='+')
-    p.add_argument('--provider', choices=('ollama','lmstudio'), default='ollama')
+    p.add_argument('--provider', choices=('ollama','lmstudio','groq'), default='ollama')
     p.add_argument('--base-url', help='Explicit HTTPS LM Studio /v1 endpoint')
     p.add_argument('--env-file', type=Path, help='Read credentials privately; never copy into results')
     args = p.parse_args()
     if args.env_file:
         private = dotenv_values(args.env_file)
+        if private.get('GROQ_API_KEY'):
+            os.environ['GROQ_API_KEY'] = private['GROQ_API_KEY']
         key = private.get('LMSTUDIO_API_KEY') or private.get('INFERENCE_API_KEY')
         if key:
             os.environ['INFERENCE_API_KEY'] = key
     if args.provider == 'lmstudio' and not args.base_url:
         p.error('Hosted evaluation needs --base-url')
+    if args.provider == 'groq' and not os.getenv('GROQ_API_KEY'):
+        p.error('Configure the private GROQ_API_KEY in the selected .env file')
+    if args.provider == 'groq':
+        os.environ.update(GROQ_MAX_RETRIES='0', GROQ_TIMEOUT='180')
     if args.user_tasks and len(args.suites) != 1:
         p.error('DEV task selection requires one suite')
     splits = {s:json.loads((ROOT/f'splits/{s}_v1.2.json').read_text())['dev'] for s in args.suites}
     if args.user_tasks and not set(args.user_tasks) <= set(splits[args.suites[0]]['user_tasks']):
         p.error('Only published DEV tasks are allowed')
     artifact = args.artifact.resolve()
-    os.environ.update(LLM_PROVIDER='compatible', LLM_MODEL=MODEL,
-        PROVENANCE_PROVIDER='compatible', PROVENANCE_MODEL=MODEL,
-        REVIEWER_PROVIDER='compatible', REVIEWER_MODEL=MODEL, P2_ANOMALY_MODEL=str(artifact))
+    provider = 'groq' if args.provider == 'groq' else 'compatible'
+    os.environ.update(LLM_PROVIDER=provider, LLM_MODEL=MODEL,
+        PROVENANCE_PROVIDER=provider, PROVENANCE_MODEL=MODEL,
+        REVIEWER_PROVIDER=provider, REVIEWER_MODEL=MODEL, P2_ANOMALY_MODEL=str(artifact))
     from agent_framework import runner
     from agent_framework.policies.anomaly import AnomalyPolicy
     if AnomalyPolicy(artifact).artifact is None:
         p.error('A valid explicit anomaly artifact is required')
-    runtime = runtime_identity() if args.provider == 'ollama' else hosted_identity(args.base_url)
+    runtime = (runtime_identity() if args.provider == 'ollama' else
+               {'provider':'groq','base_url':'https://api.groq.com/openai/v1','model':MODEL,
+                'api_retries':0,'request_interval_seconds':65,'agent_max_tokens':4096,
+                'policy_max_tokens':2048,'reviewer_max_tokens':2048,'temperature':0,
+                'no_cloud_fallback':True,'quota_policy':'free tier only; stop on quota'}
+               if args.provider == 'groq' else hosted_identity(args.base_url))
     sources = set(CODE_PATHS) | {str(x.relative_to(ROOT)) for folder in ('agent_framework','p2_anomaly')
                               for x in (ROOT/folder).rglob('*.py') if 'artifacts' not in x.parts}
     plan = [{'policy':policy,'suite':suite,'attack':args.attack,'k':2}
@@ -159,6 +194,7 @@ def main():
     if report['configuration'] != identity:
         p.error('Configuration changed; keep the original run separate')
     report['status'] = 'running matched DEV comparison'; save(report_path,report)
+    clock = [None]
     try:
         for job in plan:
             name = '{policy}-{suite}-{attack}-k{k}'.format(**job)
@@ -167,7 +203,7 @@ def main():
             selected = splits[job['suite']]
             users = args.user_tasks or selected['user_tasks']
             output = outdir/name
-            run_args = SimpleNamespace(provider='compatible',llm=MODEL,reviewer='llm',
+            run_args = SimpleNamespace(provider=provider,llm=MODEL,reviewer='llm',
                 reviewer_model=MODEL,policy=job['policy'],benchmark_version='v1.2',
                 suite=job['suite'],attack=job['attack'],user_tasks=users,
                 injection_tasks=selected['injection_tasks'] if job['attack']!='none' else None,
@@ -175,8 +211,8 @@ def main():
                 outdir=str(output),force=False,shadow_audit=False)
             print('Starting matched DEV '+name,flush=True)
             backend = (local_factories(True,outdir,runtime) if args.provider == 'ollama'
-                       else hosted_clients(args.base_url))
-            with backend, policy_clients(), reviewer_json_variant(True,allowed_base_url=args.base_url if args.provider=='lmstudio' else None), banking_review_variant(True), hosted_factories('compatible'), agent_variant(True):
+                       else groq_clients(clock) if args.provider == 'groq' else hosted_clients(args.base_url))
+            with backend, policy_clients(), reviewer_json_variant(True,allowed_base_url=args.base_url if args.provider=='lmstudio' else None), banking_review_variant(True), hosted_factories(provider), agent_variant(True):
                 result = runner.run_one(run_args,2)
             summary = load_summary(output,result,{'suite':job['suite'],'benchmark_version':'v1.2'},job)
             expected = len(users)*(len(selected['injection_tasks']) if job['attack']!='none' else 1)
