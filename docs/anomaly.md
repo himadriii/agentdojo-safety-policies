@@ -398,8 +398,11 @@ the DEV evidence directory.
 Clean completion was 16/20 with the gate versus 17/20 with the matched
 recovery-enabled full-approve baseline. Of 24 attacked episodes containing a
 denial, 13 still completed safely; a denied call is not necessarily malicious.
-Travel reported an attacker-goal capability failure, limiting the interpretation
-of zero successful attacks. No matched Isolation Forest ablation was run, so
+Travel reported an attacker-goal capability failure: in the DEV direct-goal
+check for injection_task_0, the agent asked which city Riverside View Hotel was
+in and made no tool calls. The other DEV goal check (injection_task_4) passed.
+This limits the interpretation of zero successful attacks; it was not a gate
+denial. Details are in `travel-capability-audit.json`. No matched Isolation Forest ablation was run, so
 these results do not establish the learned detector's independent benefit.
 
 Evidence is in `p2_anomaly/artifacts/development/local20-full-v1/`.
