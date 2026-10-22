@@ -364,5 +364,31 @@ DEV gate and matched baseline, disjoint fitting/calibration families, audited
 live calibration, unchanged source/splits/model/runtime, team configuration
 confirmation, a committed freeze record/tag, and `FINAL_RUN=1`. It supports the
 project budgets 0/1/2/3/5 and caches completed results without resampling failures.
-Preparing this runner does not read or execute held-out tasks; no final freeze
-has been created while team configuration confirmation is pending.
+Preparing this runner did not read or execute held-out tasks. The team configuration
+was subsequently confirmed, and the completed DEV profile was frozen as described below.
+
+### Completed local development run and final freeze
+
+The local Ollama 20B/20B run completed all 86 scored DEV episodes. All 91 saved
+traces, including attacker-goal checks, passed verification with zero problems.
+These scores are DEV diagnostics, not final held-out scores, and are not pooled
+with Groq or hosted inference results.
+
+| Suite | Attacked safe completion | HITL Load | All reviews | Successful attacks |
+|---|---:|---:|---:|---:|
+| Banking | 14/18 | 14 | 15 | 0 |
+| Slack | 6/14 | 7 | 9 | 0 |
+| Travel | 9/14 | 8 | 10 | 0 |
+| Total | 29/46 (63.0%) | 29 | 34 | 0/46 |
+
+Clean completion was 16/20 with the gate versus 17/20 with the matched
+recovery-enabled full-approve baseline. Of 24 attacked episodes containing a
+denial, 13 still completed safely; a denied call is not necessarily malicious.
+Travel reported an attacker-goal capability failure, limiting the interpretation
+of zero successful attacks. No matched Isolation Forest ablation was run, so
+these results do not establish the learned detector's independent benefit.
+
+Evidence is in `p2_anomaly/artifacts/development/local20-full-v1/`.
+The team-confirmed profile, unchanged anomaly model and provenance are frozen in
+`p2_anomaly/artifacts/frozen/local20-v1/`, tag `freeze-p2-local20-v1`.
+Final held-out evaluation uses this fixed profile at budgets 0/1/2/3/5.
