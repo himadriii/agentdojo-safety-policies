@@ -42,6 +42,19 @@ def _flatten(content):
     return content
 
 
+def as_context_length_error(error):
+    """The BadRequestError AgentDojo records as a task error when a local server fails on a long prompt, else None.
+
+    AgentDojo only tolerates `context_length_exceeded`; local servers word their context and memory
+    failures differently, which would otherwise crash the whole stage.
+    """
+    text = str(error)
+    if any(marker in text.casefold() for marker in _CONTEXT_ERRORS):
+        return openai.BadRequestError(
+            text, response=error.response, body={"code": "context_length_exceeded", "message": text})
+    return None
+
+
 def make_local_compatible(client):
     completions = client.chat.completions
     original = completions.create
@@ -63,11 +76,9 @@ def make_local_compatible(client):
         try:
             return original(*args, **kwargs)
         except openai.APIStatusError as error:
-            text = str(error)
-            if any(marker in text.casefold() for marker in _CONTEXT_ERRORS):
-                raise openai.BadRequestError(
-                    text, response=error.response, body={"code": "context_length_exceeded", "message": text}
-                ) from error
+            mapped = as_context_length_error(error)
+            if mapped is not None:
+                raise mapped from error
             raise
 
     completions.create = create
