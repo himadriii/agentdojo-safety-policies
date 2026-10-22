@@ -412,6 +412,23 @@ Final held-out evaluation uses this fixed profile at budgets 0/1/2/3/5.
 
 ### Team integration and submission status
 
+PR #15 was merged into main at `c95dbc3`. A separate development-only
+`anomaly_provenance` policy implements deny-on-either, approve-on-both, otherwise
+one escalation through the shared executor. It short-circuits provenance after
+an anomaly denial and logs both child decisions/evidence with separate state.
+No child gate is retrained or given benchmark task labels.
+
+`python -m p2_anomaly.combined_dev --artifact
+p2_anomaly/artifacts/development/cross-suite-v7/model.joblib --outdir
+results/dev/P2-combined-local20-v1` runs all 46 published attacked DEV cases for
+each of anomaly, provenance and the combination at k=2 (138 scored episodes).
+All use the same local 20B runtime, recovery/reviewer guidance and policy-schema
+transport. Provenance tokens are counted as policy tokens, separately from the
+single reviewer budget. API failures stop the study; results cannot resume under
+changed code/model settings. The model unloads when the study stops or finishes.
+The implementation and transport checks pass the full 544-test suite. Combined
+benchmark results are pending; no improvement is claimed from offline tests.
+
 The isolated P2 integration branch merges main at `a2f3c1c` and preserves main's
 runner, executor and provider implementations. The merged tree passes all 391
 tests after updating a stale provenance-schema test assertion to match the
