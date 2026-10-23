@@ -5,6 +5,7 @@ from agent_framework.policies.supervised_risk import SupervisedRiskPolicy
 from agent_framework.policies.approval_reuse.policy import ApprovalReusePolicy
 from agent_framework.policies.approval_reuse.similarity import SimilarityReusePolicy
 from agent_framework.policies.plan_consistency import PlanConsistencyPolicy
+from agent_framework.policies.p4_p6_p7_combined_or import P4P6P7CombinedOrPolicy
 from agent_framework.reviewer import MockReviewer
 from agent_framework.policies.provenance_gate import ProvenancePolicy
 from agent_framework.llm_reviewer import LLMReviewer
@@ -20,6 +21,7 @@ POLICIES = {
     "similarity_reuse": SimilarityReusePolicy,
     "plan_consistency": PlanConsistencyPolicy,
     "provenance": ProvenancePolicy,
+    "p4_p6_p7_combined_or": P4P6P7CombinedOrPolicy,
 }
 REVIEWERS = {
     "mock": MockReviewer,

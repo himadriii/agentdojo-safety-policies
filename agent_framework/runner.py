@@ -59,13 +59,18 @@ def build_pipeline(llm_name, policy_name, reviewer_name, k, provider="openai", r
         logging.warning("Agent token usage is only tracked for OpenAI-compatible providers.")
 
     inference_config = {"agent": {"provider": provider, "model": llm_name}}
-    if policy_name == "provenance":
+    if policy_name in {"provenance", "p4_p6_p7_combined_or"}:
         policy_provider, policy_model = component_settings("PROVENANCE", provider, llm_name)
-        policy = POLICIES[policy_name](
+        provenance = POLICIES["provenance"](
             client_factory=lambda: track_openai_client(
                 make_inference_client(policy_provider, response_schema=PROVENANCE_SCHEMA), "policy"
             ),
             model=policy_model,
+        )
+        policy = (
+            provenance
+            if policy_name == "provenance"
+            else POLICIES[policy_name](provenance=provenance)
         )
         inference_config["policy"] = {"provider": policy_provider, "model": policy_model}
     else:

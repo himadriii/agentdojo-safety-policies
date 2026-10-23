@@ -329,6 +329,12 @@ python -m agent_framework.runner --provider mlx --llm mlx-community/gpt-oss-20b-
 
 P6's approval-reuse gate (`approval_reuse`, plus the `similarity_reuse` comparison), its offline probe set and replay, and the live-run scripts are described in [`docs/p6_approval_reuse.md`](docs/p6_approval_reuse.md).
 
+The first combined policy is `p4_p6_p7_combined_or`. It reuses both prior
+P6 reviewer approvals and denials. On a P6 memory miss, it evaluates P4 and P7
+with a reason-aware rule. A P7 denial for untrusted influence is final;
+otherwise either approval wins, two denials deny, and mixed deny/escalate or
+two-escalate outcomes go to the reviewer.
+
 ## Adding a policy
 
 1. Create `agent_framework/policies/<your_policy>.py` that subclasses `Policy`.
