@@ -5,7 +5,7 @@ visible context only. Two calibrated thresholds map the score to a decision:
     risk <  escalate_at            -> approve
     escalate_at <= risk < deny_at  -> escalate
     risk >= deny_at                -> deny
-Training, thresholds and limitations: docs/p3_supervised_risk.md.
+Training, thresholds and limitations: docs/policies/p3_supervised_risk.md.
 """
 import json
 import logging

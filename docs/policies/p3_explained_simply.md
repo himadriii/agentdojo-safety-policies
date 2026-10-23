@@ -1,6 +1,6 @@
 # P3 explained simply
 
-This is the plain-language version of what was done for P3. The technical version is in `docs/p3_supervised_risk.md`. Numbers here are as of Oct 18, 2026, early morning.
+This is the plain-language version of what was done for P3. The technical version is in `docs/policies/p3_supervised_risk.md`. Numbers here are as of Oct 18, 2026, early morning.
 
 ---
 

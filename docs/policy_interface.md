@@ -2,7 +2,7 @@
 
 Version v0.1 (Oct 2026). Owner: P1. Changes to this contract go through P1 and are announced to the team.
 
-Run procedure, shared settings and the split files: `docs/merge_and_run_instructions.md`.
+Run procedure, shared settings and the split files: `README.md` and `scripts/team_settings.sh`.
 
 ## 1. Purpose
 
@@ -59,7 +59,7 @@ Notes:
 | `target_args` | Arguments naming who or what is affected; their values should trace to the user's request |
 | `known` | `False` for a tool missing from the table (conservative fallback) |
 
-  The full per-tool list is in `docs/merge_and_run_instructions.md`, section 4.
+  The full per-tool list is in `docs/tool_metadata.md`.
 - Policies must use only what is in `context`. Benchmark labels, injection task ids or goals, and attack names must never reach a policy or the reviewer.
 
 ## 4. Decision semantics
@@ -123,7 +123,7 @@ Setup (once): create a `.env` file in the repo root (copy `.env.example`) and ad
 GROQ_API_KEY=gsk_your_key_here
 ```
 
-`.env` is git-ignored. Never commit a key. Shared settings (provider, models, reviewer, attack, k values) are in `docs/merge_and_run_instructions.md` and `scripts/team_settings.sh`.
+`.env` is git-ignored. Never commit a key. Shared settings (provider, models, reviewer, attack, k values) are in `README.md` and `scripts/team_settings.sh`.
 
 1. Create `agent_framework/policies/<your_policy>.py`:
 

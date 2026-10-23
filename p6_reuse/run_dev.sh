@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # P6 dev run on the shared dev split: agent on LM Studio (ngrok URL + key from .env), reviewer on Groq gpt-oss-120b.
-# Same runner arguments as scripts/run_split.sh, but the provider split lives here so shared scripts stay untouched.
+# Same runner arguments as scripts/team_settings.sh, but the provider split lives here so shared scripts stay untouched.
 #
 # usage: bash p6_reuse/run_dev.sh [policy] ["k values"] [outdir]
 set -euo pipefail
