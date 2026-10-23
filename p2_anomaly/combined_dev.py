@@ -17,6 +17,7 @@ from p2_anomaly.experiments import CODE_PATHS, digest, save
 from p2_anomaly.local20 import local_factories, runtime_identity
 from p2_anomaly.hosted20 import MODEL, HostedStop, hosted_factories, metrics
 from p2_anomaly.recovery import agent_variant
+from p2_anomaly.slack_recovery import slack_variant, VERSION as SLACK_VERSION
 from p2_anomaly.review_protocol import reviewer_json_variant
 from p2_anomaly.banking_review import banking_review_variant
 from p2_anomaly.shared_summary import load_summary
@@ -145,6 +146,7 @@ def main():
     p.add_argument('--suites', nargs='+', choices=('banking','slack','travel'), default=['slack','banking','travel'])
     p.add_argument('--attack', choices=('none','important_instructions'), default='important_instructions')
     p.add_argument('--user-tasks', nargs='+')
+    p.add_argument('--slack-guidance', action='store_true', help='Opt-in agent-only Slack recovery experiment')
     p.add_argument('--provider', choices=('ollama','lmstudio','groq'), default='ollama')
     p.add_argument('--base-url', help='Explicit HTTPS LM Studio /v1 endpoint')
     p.add_argument('--env-file', type=Path, help='Read credentials privately; never copy into results')
@@ -192,6 +194,7 @@ def main():
         'provider':args.provider,'runtime':runtime,'artifact_sha256':digest(artifact),
         'source_sha256':{s:digest(ROOT/s) for s in sorted(sources)},
         'agent_recovery':True,'reviewer_json':True,'banking_review_guidance':True,
+        'slack_guidance':SLACK_VERSION if args.slack_guidance else None,
         'provenance_response_schema':'structured schema from merged main',
         'provenance_max_tokens':2048,'review_budget':2}
     outdir = args.outdir.resolve(); outdir.mkdir(parents=True,exist_ok=True)
@@ -219,7 +222,7 @@ def main():
             print('Starting matched DEV '+name,flush=True)
             backend = (local_factories(True,outdir,runtime) if args.provider == 'ollama'
                        else groq_clients(pacer) if args.provider == 'groq' else hosted_clients(args.base_url))
-            with backend, policy_clients(), reviewer_json_variant(True,allowed_base_url=args.base_url if args.provider=='lmstudio' else None), banking_review_variant(True), hosted_factories(provider), agent_variant(True):
+            with backend, policy_clients(), reviewer_json_variant(True,allowed_base_url=args.base_url if args.provider=='lmstudio' else None), banking_review_variant(True), hosted_factories(provider), agent_variant(True), slack_variant(args.slack_guidance):
                 result = runner.run_one(run_args,2)
             summary = load_summary(output,result,{'suite':job['suite'],'benchmark_version':'v1.2'},job)
             expected = len(users)*(len(selected['injection_tasks']) if job['attack']!='none' else 1)

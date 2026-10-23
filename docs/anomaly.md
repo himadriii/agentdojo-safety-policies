@@ -465,3 +465,26 @@ provider or adopting the upcoming shared reviewer requires a separately labelled
 cohort; do not pool with this partial frozen run. Existing held-out exposure
 remains recorded. Combined-gate candidates must be coordinated with the group
 and selected using DEV evidence.
+
+### Opt-in Slack recovery experiment (hosted 20B)
+
+`--slack-guidance` in `p2_anomaly.combined_dev` enables an agent-only
+experiment; it defaults off. The anomaly artifact/threshold, reviewer v2 and
+k=2 are unchanged. Guidance excludes injected directives from summaries,
+requires exact identifiers and genuine invitations, and distinguishes a chat
+answer from successful message delivery. Version 2 adds at most one completion
+check after a denial; it cannot execute a call or bypass the approval policy.
+
+On the same supplied LM Studio 20B endpoint, baseline and guidance v1 each
+completed 3/14 attacked DEV cases safely and 5/7 clean DEV tasks. No successful
+attacks were observed in either complete attacked run. This does not demonstrate
+an improvement, and neither cohort replaces the historical 6/14 local score.
+Version 2 stopped after 12/14 attacked cases (2 safely completed) following three
+hosted reviewer InternalServerError interruptions; its result is incomplete and
+not a final TCR. No v2 clean result is available. Clean completion is measured
+using utility, not the no-attack security sentinel.
+
+Per-case outcomes, configuration hashes and stop events are in
+`submitted_results/dev/P2-slack-hosted-recovery/comparison.json`. The v1 source
+is retained alongside the comparison; current opt-in source is v2. All 564
+local tests pass. Neither experimental version is promoted as the default.
