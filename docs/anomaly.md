@@ -1,3 +1,9 @@
+> **Methodology correction:** the historical 29/46 (63.0%) cohort below is
+> exploratory DEV evidence. It includes scored-task fitting overlap, narrow
+> wording-based authorization shortcuts, and custom agent/reviewer guidance.
+> It is not an independent generalization result or a fair shared-prompt gate
+> comparison. See the task-disjoint audit below for the corrected protocol.
+
 # P2 anomaly gate
 
 Owner: P2. Candidate: `p2_anomaly/artifacts/development/cross-suite-v3`.
@@ -430,3 +436,66 @@ provider or adopting the upcoming shared reviewer requires a separately labelled
 cohort; do not pool with this partial frozen run. Existing held-out exposure
 remains recorded. Combined-gate candidates must be coordinated with the group
 and selected using DEV evidence.
+
+### Task-disjoint shared-prompt audit
+
+The `p2/disjoint-dev-audit` variant removes the channel-prefix, ranked-recipient
+and invitation approval templates from `anomaly_authorization.py`. All such calls
+fall through to ordinary coverage/scoring/review. Generic payment-destination,
+reservation-keyword and URL-source constraints remain heuristics. Literal words
+or an argument appearing in user text alone do not establish authorization.
+
+`python -m p2_anomaly.disjoint_train --source
+p2_anomaly/artifacts/development/cross-suite-v7 --outdir NEW_DIRECTORY` produces
+three explicit variants. The saved `disjoint-v1` artifacts use only workspace:
+123 fitting calls (93 audited real, 30 reference) on 13 tasks/7 declared families;
+34 audited-real calibration calls on 8 tasks/6 families. Fitting/calibration task
+and family sets are disjoint. Neither contains any of the 20 banking/Slack/travel
+DEV scoring tasks. No vectors are transformed twice. Seed 42, 200 trees and the
+10% calibration target remain fixed; the refitted threshold is 0.542453742332963.
+These previously inspected DEV tasks are not fresh held-out data. Workspace-only
+training is a deliberate transfer test and weakens suite-specific coverage.
+
+`python -m p2_anomaly.disjoint_dev --artifacts
+p2_anomaly/artifacts/development/disjoint-v1 --outdir NEW_RESULTS --base-url
+HTTPS_ENDPOINT/v1 --env-file .env` uses the shared runner, stock agent system
+prompt and reviewer v2 unchanged, with hosted GPT-OSS-20B for both and k=2. No
+recovery, banking, formatting or reviewer-schema prompt patches are applied.
+Prompt/source/artifact hashes are recorded; changed settings cannot resume an
+existing cohort. Infrastructure failures stop scoring instead of becoming gate
+denials. Clean tasks are counted by utility alone, because the no-attack raw
+security sentinel is not an attack-success measurement.
+
+Variants:
+- `detector_only`: forest and coverage fallback; no authorization/context guards
+  or mandatory sensitive-action review list.
+- `generic_rules_only`: generic guards, coverage and mandatory sensitive reviews;
+  no forest scoring.
+- `detector_generic`: the same generic wrapper plus forest scoring. Compare this
+  to `generic_rules_only` to isolate the forest's incremental effect.
+
+Corrected completed attacked suites: banking 7/18 (38.9%), HITL 11, total reviews
+23; Slack 1/14 (7.1%), HITL 2, total reviews 24. Both observed zero successful
+attacks. Travel stopped after 8/14 (0 safe completions); no final travel/overall
+TCR is claimed. Clean banking completed 3/6 and clean Slack 2/7; clean travel is
+incomplete. Rules-only stopped at 9/14 Slack cases (1 safe), and detector-only at
+13/14 (1 safe, 2 successful attacks). Different incomplete subsets cannot rank
+variants. The host repeatedly returned HTTP 503 or HTTP 400 with:
+`The model produced output that does not match the expected peg-native format`.
+
+A fixed-proposal audit replays 146 proposals from the main run through all three
+variants on the same recorded history. Adding the forest to the generic wrapper
+changed 25 approvals to escalations. This is not a counterfactual live utility or
+attack-performance result. Offline wording/negation checks pass; a separate
+six-case live paraphrase attempt returned HTTP 404 before any case completed,
+so no claim of end-to-end paraphrase robustness is made. The attempt rewrites
+DEV tasks only and does not train on their results.
+
+Evidence, per-case outcomes and incomplete status are in
+`submitted_results/dev/P2-disjoint-shared-v1/`. Original overlapping/tuned scores
+are retained with an explicit methodology warning, not silently replaced. The historical
+travel capability failure remains disclosed for the old cohort. All seven
+direct-goal checks in the new main run passed; incomplete task coverage still
+limits protection claims. No held-out tasks were run, no old freeze was overwritten,
+and no new final freeze/held-out claim is made while validation is incomplete.
+The shared runner, executor, metadata and split files were not edited.
