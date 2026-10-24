@@ -6,7 +6,7 @@ pair. This script recomputes it from every finished trace, with the runner's own
 (agent_framework/runner.py, run_one): a pair counts only if AgentDojo recorded a result for it,
 and AgentDojo's baseline runs of injection tasks as plain user tasks are excluded.
 
-Usage:  python -m p3_risk.summarize_traces results/dev/sahana [--check]
+Usage:  python -m p3_risk.summarize_traces results/dev/P3 [--check]
   --check  compare with the existing summaries instead of overwriting them
 """
 import argparse

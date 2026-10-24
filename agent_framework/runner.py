@@ -32,8 +32,7 @@ from agent_framework.inference import (
 from agent_framework.runner_config import load_runner_env, validate_inference_args
 from agent_framework.policies.provenance_gate.extractor import PROVENANCE_SCHEMA
 from agent_framework.registry import POLICIES, REVIEWERS
-# from agent_framework.llm_reviewer import REVIEWER_PROMPT_VERSION
-from agent_framework.llm_reviewer import prompt_tag
+from agent_framework.llm_reviewer import REVIEWER_PROMPT_VERSION
 
 OUTPUT_GUIDANCE = (
     "When the user requests an exact output format, return the requested value "
@@ -60,13 +59,18 @@ def build_pipeline(llm_name, policy_name, reviewer_name, k, provider="openai", r
         logging.warning("Agent token usage is only tracked for OpenAI-compatible providers.")
 
     inference_config = {"agent": {"provider": provider, "model": llm_name}}
-    if policy_name == "provenance":
+    if policy_name in {"provenance", "p4_p6_p7_combined_or"}:
         policy_provider, policy_model = component_settings("PROVENANCE", provider, llm_name)
-        policy = POLICIES[policy_name](
+        provenance = POLICIES["provenance"](
             client_factory=lambda: track_openai_client(
                 make_inference_client(policy_provider, response_schema=PROVENANCE_SCHEMA), "policy"
             ),
             model=policy_model,
+        )
+        policy = (
+            provenance
+            if policy_name == "provenance"
+            else POLICIES[policy_name](provenance=provenance)
         )
         inference_config["policy"] = {"provider": policy_provider, "model": policy_model}
     else:
@@ -98,8 +102,7 @@ def build_pipeline(llm_name, policy_name, reviewer_name, k, provider="openai", r
     # Separate local and hosted results, including policy/reviewer model overrides.
     pipeline.inference_config = inference_config
     config_key = hashlib.sha256(json.dumps(inference_config, sort_keys=True).encode()).hexdigest()[:10]
-    # reviewer_tag = f"{reviewer_name}{REVIEWER_PROMPT_VERSION}" if reviewer_name == "llm" else reviewer_name
-    reviewer_tag = f"{reviewer_name}{prompt_tag()}" if reviewer_name in ("llm", "local_llm") else reviewer_name
+    reviewer_tag = f"{reviewer_name}{REVIEWER_PROMPT_VERSION}" if reviewer_name == "llm" else reviewer_name
     pipeline.name = (
         f"{provider}-{llm_name}-{policy_name}-{reviewer_tag}-k{k}-{config_key}"
     ).replace("/", "_")
