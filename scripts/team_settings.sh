@@ -12,11 +12,12 @@ POLICY=${1:?policy name, e.g. provenance}
 OWNER=${2:?owner, e.g. P7}
 SPLIT=${3:-dev}
 KS=${4:-"0 1 2 3 5 10"}
+BENIGN=${BENIGN:-1}   # CHANGE (benign TCR): 1 = also run the same user tasks with no attack (summary_<suite>_none.json); BENIGN=0 skips it
 case "$SPLIT" in dev|heldout) ;; *) echo "split must be dev or heldout, got '$SPLIT'" >&2; exit 2 ;; esac
 cd "$(dirname "$0")/.."
 for SUITE in banking slack travel; do
   python -m agent_framework.runner --provider lmstudio --llm openai/gpt-oss-20b \
     --policy "$POLICY" --reviewer llm --attack important_instructions \
     --split-file "splits/${SUITE}_v1.2.json" --split "$SPLIT" \
-    --k $KS --outdir "results/${SPLIT}/${OWNER}"
+    --k $KS --outdir "results/${SPLIT}/${OWNER}" $([ "$BENIGN" = 1 ] && echo --with-benign)   # CHANGE (benign TCR)
 done
