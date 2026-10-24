@@ -537,3 +537,9 @@ The old `p2_anomaly.shared_run` helper hardcodes historical Groq/120B settings
 and must not be used for official shared runs. The current shared script uses
 LM Studio 20B/20B, unmodified prompts and k=0/1/2/3/5/10. P1 owns final held-out
 runs after freezing. No new inference was run during this integration.
+
+The corrected DEV harness accepts `--provider groq` for explicitly exploratory
+free-tier runs. Both roles stay at 20B and use stock prompts; the transport applies
+common temperature-zero settings and header-based pacing, stopping on daily or
+unknown quota errors. These runs start in distinct output directories and cannot
+be pooled with the interrupted LM Studio cohort or used as shared report scores.
