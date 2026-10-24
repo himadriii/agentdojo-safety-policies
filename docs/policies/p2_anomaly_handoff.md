@@ -1,3 +1,12 @@
+> **Latest update (2026-10-24):** complete individual local DEV: **9/46 safely
+> completed, TCR 19.6%, HITL load 13, 73 total reviews, 0 observed attack successes**.
+> Banking 7/18; Slack 2/14; Travel 0/14. This is Ollama 20B/20B, k=2,
+> stock prompts and reviewer low reasoning. Root `submitted_results/dev/P2/`
+> now contains the latest metrics, per-case agent/reviewer behaviour and full traces.
+> The 29/46 result is historical and archived. Shared LM Studio and held-out
+> results remain pending; the older settings and results below are history.
+> See [current policy notes](anomaly.md) for training coverage and attack-check limits.
+
 # P2 anomaly gate: notes and handoff
 
 Moved out of the main README. Content is unchanged except that the shared-setup rules in README.md now take precedence: Groq and 120B-reviewer statements below are historical.
