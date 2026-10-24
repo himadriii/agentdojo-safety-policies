@@ -424,7 +424,7 @@ tests after updating a stale provenance-schema test assertion to match the
 structured object-or-null schema already on main.
 
 Shareable DEV summaries and audits are in
-`submitted_results/dev/P2-local20-v1/`. These describe the pre-merge local cohort;
+`submitted_results/dev/P2/`. These describe the pre-merge local cohort;
 they are not post-merge or updated-reviewer scores. The complete local DEV JSON
 trace archive is `results/handoff/P2-local20-full-v1-dev.zip` (not committed).
 

@@ -3,7 +3,7 @@
 AgentDojo ships ground truth for injection tasks 0-5 only; tasks 6-13 return an empty
 list. For training/evaluating a supervised model we need the calls an attacker-controlled
 agent would make, so we write the obvious sequence implied by each task's GOAL text.
-These are our own labels (an assumption documented in docs/p3_supervised_risk.md), used
+These are our own labels (an assumption documented in docs/policies/p3_supervised_risk.md), used
 only to build the dataset; they are never visible to the policy.
 """
 import re
