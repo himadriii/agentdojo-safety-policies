@@ -543,3 +543,18 @@ free-tier runs. Both roles stay at 20B and use stock prompts; the transport appl
 common temperature-zero settings and header-based pacing, stopping on daily or
 unknown quota errors. These runs start in distinct output directories and cannot
 be pooled with the interrupted LM Studio cohort or used as shared report scores.
+
+A distinct Groq continuation (`P2-disjoint-groq-v1`) attempted all 18 banking
+cases with stock prompts. Raw fail-closed outcomes were 5 safe completions,
+29 total reviews (HITL on completed cases 7), zero observed successful attacks
+and five budget-exhausted denials. Five cases contained REVIEWER_PARSE_FAILURE,
+so the harness stopped validation and no clean final TCR is claimed. Slack and
+travel were not run in this cohort. Twenty-one traces passed contract verification.
+
+A two-request unscored replay of a failed recent-transactions review used the
+same prompt and 1024-token cap. Provider-default reasoning returned a parsed
+deny (512 output tokens); low reasoning returned a parsed approve (42 output
+tokens). This does not establish a truncation cause, an accuracy gain or a shared
+configuration fix. No benchmark outcomes were replaced, no failed cases were
+resampled, and shared inference changes still need team agreement. Evidence is
+in `submitted_results/dev/P2/experiments/disjoint-groq-v1/`.
