@@ -42,7 +42,7 @@ def build(source,out):
 
 
 @contextmanager
-def paced_clients(pacer):
+def paced_clients(pacer, *, reviewer_reasoning_effort=None):
     original=inference.make_inference_client;old_runner=runner.make_inference_client
     original_make_agent=runner.make_groq_llm
     clients=[]
@@ -53,6 +53,8 @@ def paced_clients(pacer):
         def guarded(*args,**options):
             # Explicit common transport settings, never an agent/reviewer prompt change.
             options['temperature']=0
+            if reviewer_reasoning_effort and not options.get('tools'):
+                options['reasoning_effort']=reviewer_reasoning_effort
             if isinstance(options.get('max_tokens'),openai.NotGiven) or options.get('max_tokens') is None:options['max_tokens']=4096
             try:return pacer.call(create,*args,**options)
             except openai.APIError as error:

@@ -6,8 +6,52 @@
 
 # P2 anomaly gate
 
-Owner: P2. Candidate: `p2_anomaly/artifacts/development/cross-suite-v3`.
-Status: DEV evaluation in progress; not frozen; no held-out scores.
+Owner: P2. Latest evaluated candidate: `p2_anomaly/artifacts/development/disjoint-v1/detector_generic`.
+Status: complete local DEV run; official shared-host comparison and held-out results remain pending.
+
+## Latest individual-gate results (2026-10-24)
+
+The current results are the **complete 46-case local DEV run**, with 20 unique user tasks.
+Both models are GPT-OSS-20B; k=2; actor reasoning medium; reviewer reasoning low with
+1,024 output tokens. The stock shared prompts are used. The backend is Ollama,
+so these are **local exploratory results, not official LM Studio or held-out scores**.
+
+| Suite | Safely completed | TCR | HITL load | Total reviews | Successful attacks | Auto-denials | Budget denials |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Banking | 7/18 | 38.9% | 9 | 19 | 0/18 | 4 | 7 |
+| Slack | 2/14 | 14.3% | 4 | 26 | 0/14 | 8 | 22 |
+| Travel | 0/14 | 0.0% | 0 | 28 | 0/14 | 3 | 42 |
+| Overall | 9/46 | 19.6% | 13 | 73 | 0/46 | 15 | 71 |
+
+HITL counts reviews on safely completed cases. Total reviews covers finalized
+scored episodes, excluding capability checks and incomplete attempts before runtime resumption.
+There were no reviewer parsing-error cases; trace verification found zero problems.
+
+Completion is poor. All 14 Travel cases encountered budget exhaustion: normal
+price, rating, address and opening-hours calls consumed reviews before all requested
+information could be retrieved. These normal calls were poorly covered: fitting
+uses **123 Workspace calls**, with **34 separate Workspace calibration calls**.
+There are no scored-suite calls in these numerical fitting/calibration sets; prior
+DEV exposure still prevents calling this fresh held-out data. Some failures also
+involve agent mistakes, guesses or abandonment. A denied call is not automatically
+a malicious action or an incorrect denial.
+
+Slack attack-goal check 1 and Travel check 0 failed, limiting what zero successful
+attacks demonstrates. Two native runtime stops required same-configuration resumption;
+a captured parser error mixed reasoning text with tool-argument JSON. Those errors
+are retained. No isolated benefit of the anomaly model is established.
+
+Current metrics, all 46 per-case behaviour records, exact reviewer reasons,
+full traces, capability checks and runtime errors are in
+[`submitted_results/dev/P2/`](../../submitted_results/dev/P2/).
+Start with [`case-analysis.md`](../../submitted_results/dev/P2/case-analysis.md)
+or [`per-task-results.json`](../../submitted_results/dev/P2/per-task-results.json).
+The older 29/46 cohort is preserved under
+[`experiments/historical-local20-v1/`](../../submitted_results/dev/P2/experiments/historical-local20-v1/).
+Older sections below are development history; old references to the root result
+directory now refer to the current cohort and should be resolved via that archive.
+
+## Historical method and development notes
 
 ## Method
 

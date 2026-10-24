@@ -82,15 +82,17 @@ def main():
     p=argparse.ArgumentParser(__doc__)
     p.add_argument('--artifacts',type=Path,required=True);p.add_argument('--outdir',type=Path,required=True)
     p.add_argument('--provider',choices=('lmstudio','groq'),default='lmstudio')
+    p.add_argument('--reviewer-reasoning-effort',choices=('low','medium','high'))
     p.add_argument('--base-url');p.add_argument('--env-file',type=Path,required=True)
     p.add_argument('--variants',nargs='+',choices=VARIANTS,default=['detector_generic','generic_rules_only','detector_only'])
     p.add_argument('--suites',nargs='+',choices=('slack','banking','travel'),default=['slack','banking','travel'])
     p.add_argument('--attack',choices=('important_instructions','none'),default='important_instructions')
     a=p.parse_args();private=dotenv_values(a.env_file)
+    if a.reviewer_reasoning_effort and a.provider!='groq':p.error('Explicit reviewer reasoning is supported only for this Groq experiment')
     if a.provider=='lmstudio' and not a.base_url:p.error('LM Studio requires --base-url')
     if a.provider=='groq' and not private.get('GROQ_API_KEY'):p.error('Configure GROQ_API_KEY privately')
     os.environ.update(LLM_PROVIDER=a.provider,LLM_MODEL=MODEL,LMSTUDIO_MODEL=MODEL,
-        LMSTUDIO_BASE_URL=a.base_url or '',LMSTUDIO_API_KEY=private.get('LMSTUDIO_API_KEY') or private.get('INFERENCE_API_KEY') or 'aarav_ntu',
+        LMSTUDIO_BASE_URL=a.base_url or '',LMSTUDIO_API_KEY=private.get('LMSTUDIO_API_KEY') or private.get('INFERENCE_API_KEY') or 'local-inference',
         LMSTUDIO_MAX_RETRIES='0',LMSTUDIO_TIMEOUT='90',REVIEWER_PROVIDER=a.provider,REVIEWER_MODEL=MODEL)
     if a.provider=='groq':os.environ.update(GROQ_API_KEY=private['GROQ_API_KEY'],GROQ_MAX_RETRIES='0',GROQ_TIMEOUT='90')
     artifacts=a.artifacts.resolve();out=a.outdir.resolve();out.mkdir(parents=True,exist_ok=True)
@@ -99,6 +101,8 @@ def main():
     identity={'scope':'Task-disjoint DEV, previously exposed during development; not held-out',
         'variants':a.variants,'suites':a.suites,'attack':a.attack,'k':2,'endpoint':a.base_url if a.provider=='lmstudio' else 'https://api.groq.com/openai/v1',
         'provider':a.provider,'reportable_shared_setup':a.provider=='lmstudio',
+        'reviewer_reasoning_effort':a.reviewer_reasoning_effort or 'provider default',
+        'temperature':0,'reviewer_max_tokens':1024,'agent_max_tokens':4096,
         'agent_model':MODEL,'reviewer_model':MODEL,'reviewer_prompt_version':REVIEWER_PROMPT_VERSION,
         'shared_system_prompt_sha256':hashlib.sha256(load_system_message(None).encode()).hexdigest(),
         'shared_reviewer_prompt_sha256':hashlib.sha256(SYSTEM_PROMPT.encode()).hexdigest(),
@@ -123,7 +127,7 @@ def main():
                     policy='anomaly',benchmark_version='v1.2',suite=suite,attack=a.attack,
                     user_tasks=split['user_tasks'],injection_tasks=split['injection_tasks'] if a.attack!='none' else None,
                     split_file=str(ROOT/f'splits/{suite}_v1.2.json'),split='dev',outdir=str(output),force=False,shadow_audit=False)
-                with (paced_clients(pacer) if a.provider=='groq' else guarded_clients()):runner.run_one(args,2)
+                with (paced_clients(pacer,reviewer_reasoning_effort=a.reviewer_reasoning_effort) if a.provider=='groq' else guarded_clients()):runner.run_one(args,2)
                 measured=summarize(output,suite,a.attack,len(split['user_tasks'])*(len(split['injection_tasks']) if a.attack!='none' else 1))
                 if subprocess.run([sys.executable,str(ROOT/'scripts/verify_traces.py'),str(output)]).returncode:
                     raise InfrastructureStop('Trace verification failed')
