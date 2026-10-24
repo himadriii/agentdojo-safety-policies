@@ -34,6 +34,12 @@ class PendingReuse(FixedPolicy):
         return decision, state, info
 
 
+class RecordingReuse(PendingReuse):
+    def record_external_approval(self, context, state, source):
+        state.setdefault("approved", []).append({"function": context["proposed_call"].function, "source": source})
+        return state
+
+
 def context():
     call = FunctionCall(function="search_emails", args={"query": "flight"}, id="c1")
     return {
@@ -47,20 +53,40 @@ def context():
 
 def build(reuse, plan, provenance, provenance_reason=None):
     return P4P6P7CombinedOrPolicy(
-        reuse=PendingReuse(reuse),
+        reuse=RecordingReuse(reuse),
         plan=FixedPolicy(plan),
         provenance=FixedPolicy(provenance, provenance_reason),
     )
 
 
-def test_reused_p6_decisions_short_circuit_p4_and_p7():
-    for reused in ("approve", "deny"):
-        policy = build(reused, "approve", "approve")
-        decision, _, info = policy.evaluate(context(), {})
-        assert decision == reused
-        assert policy.plan.calls == 0
-        assert policy.provenance.calls == 0
-        assert info["evidence"]["components"]["p6"]["decision"] == reused
+def test_p6_reuse_approve_applies_only_when_gates_escalate():
+    policy = build("approve", "escalate", "escalate")
+    decision, _, info = policy.evaluate(context(), {})
+    assert decision == "approve"
+    assert info["scores"]["p6_approved"] == 1.0
+    assert policy.plan.calls == policy.provenance.calls == 1
+
+
+def test_p6_reuse_approve_cannot_override_gate_deny():
+    decision, _, _ = build("approve", "deny", "deny").evaluate(context(), {})
+    assert decision == "deny"
+
+
+def test_p6_remembered_denial_overrides_gate_approve():
+    decision, _, _ = build("deny", "approve", "approve").evaluate(context(), {})
+    assert decision == "deny"
+
+
+def test_gate_approval_is_recorded_in_p6_memory():
+    _, st, info = build("escalate", "escalate", "approve").evaluate(context(), {})
+    assert st["reuse"]["approved"] == [{"function": "search_emails", "source": "p7"}]
+    assert info["evidence"]["recorded_gate_approval"] == "p7"
+    _, st, _ = build("escalate", "approve", "escalate").evaluate(context(), {})
+    assert st["reuse"]["approved"][0]["source"] == "p4"
+    _, st, _ = build("escalate", "escalate", "escalate").evaluate(context(), {})
+    assert "approved" not in st["reuse"]
+    _, st, _ = build("escalate", "deny", "deny").evaluate(context(), {})
+    assert "approved" not in st["reuse"]
 
 
 def test_real_p6_remembered_denial_is_final():
@@ -87,10 +113,9 @@ def test_real_p6_remembered_denial_is_final():
     }
     decision, _, _ = policy.evaluate(context(), state)
     assert decision == "deny"
-    assert plan.calls == provenance.calls == 0
 
 
-def test_p6_escalation_runs_both_source_gates():
+def test_gates_always_run():
     policy = build("escalate", "approve", "deny")
     decision, _, _ = policy.evaluate(context(), {})
     assert decision == "approve"
@@ -137,3 +162,39 @@ def test_pending_reuse_record_survives_only_when_reviewer_will_run():
 
 def test_registered_with_zero_argument_factory():
     assert isinstance(POLICIES["p4_p6_p7_combined_or"](), P4P6P7CombinedOrPolicy)
+
+
+
+def test_real_p6_reuses_gate_approval_for_exact_cover_but_not_drill_down():
+    policy = P4P6P7CombinedOrPolicy(
+        reuse=ApprovalReusePolicy(), plan=FixedPolicy("escalate"), provenance=FixedPolicy("approve")
+    )
+    first = FunctionCall(function="get_all_hotels_in_city", args={"city": "Paris"}, id="a")
+    ctx = {
+        "task": "Find hotels in Paris",
+        "proposed_call": first,
+        "trajectory": [{"role": "assistant", "tool_calls": [first]}],
+        "remaining_budget": 2,
+        "metadata": {"decision_history": []},
+    }
+    decision, state, _ = policy.evaluate(ctx, {})
+    assert decision == "approve"
+    record = state["reuse"]["approved"][0]
+    assert record["source"] == "p7"
+
+    # gates now escalate everything; P6 alone decides
+    policy.plan, policy.provenance = FixedPolicy("escalate"), FixedPolicy("escalate")
+    again = FunctionCall(function="get_all_hotels_in_city", args={"city": "Paris"}, id="b")
+    ctx2 = {**ctx, "proposed_call": again,
+            "trajectory": ctx["trajectory"] + [
+                {"role": "tool", "tool_call_id": "a", "tool_call": first,
+                 "content": [{"type": "text", "content": "Le Marais Boutique, Good Night"}]},
+                {"role": "assistant", "tool_calls": [again]}]}
+    decision, state, info = policy.evaluate(ctx2, state)
+    assert decision == "approve" and info["scores"]["p6_approved"] == 1.0
+
+    drill = FunctionCall(function="get_hotels_prices", args={"hotel_names": ["Le Marais Boutique"]}, id="c")
+    ctx3 = {**ctx2, "proposed_call": drill,
+            "trajectory": ctx2["trajectory"] + [{"role": "assistant", "tool_calls": [drill]}]}
+    decision, _, info = policy.evaluate(ctx3, state)
+    assert decision == "escalate" and info["scores"]["p6_approved"] == 0.0

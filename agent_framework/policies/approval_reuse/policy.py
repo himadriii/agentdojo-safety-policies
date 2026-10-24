@@ -87,6 +87,8 @@ class ApprovalReusePolicy(Policy):
                 return "approve"
         if self.drill_down:
             for record in state["approved"]:
+                if record.get("source", "reviewer") != "reviewer":
+                    continue  # gate-approved reads are not trusted to ground drill-downs
                 if record["function"] != call.function and drill_down_covers(
                         call.function, args, record["function"], record["args"],
                         self._pool(record, context["trajectory"]), context["task"]):
@@ -105,6 +107,22 @@ class ApprovalReusePolicy(Policy):
         })
         info.setdefault("reason", "no earlier reviewer decision covers this call")
         return "escalate"
+
+    @staticmethod
+    def record_external_approval(context, state, source):
+        """Remember a call that another gate approved, so exact-cover reuse can match it later.
+
+        Records carry `source` (e.g. "p4", "p7"); only reviewer-sourced records may ground drill-downs.
+        Mutates and returns `state`.
+        """
+        call = context["proposed_call"]
+        args = dict(call.args)
+        approved = state.setdefault("approved", [])
+        if any(r["function"] == call.function and r["args"] == args for r in approved):
+            return state
+        approved.append({"id": call.id, "function": call.function, "args": args,
+                         "index": len(context["trajectory"]), "members": [], "source": source})
+        return state
 
     @staticmethod
     def _remember_member(record, call, context):

@@ -1,18 +1,23 @@
-"""Combined P6 -> (P4 OR P7) approval policy.
+"""Combined (P4 OR P7) -> P6 approval policy.
 
-P6 gets the first chance to reuse an earlier reviewer decision.  A remembered
-approval or denial is final.  When P6 has no matching memory and escalates,
-the unchanged P4 plan-consistency and P7 provenance gates are evaluated and
-combined with a reason-aware three-valued OR:
+P4 plan consistency and P7 provenance are evaluated first and combined with a
+reason-aware three-valued OR:
 
 * a P7 denial for untrusted influence -> deny
 * otherwise any approve -> approve
 * both deny -> deny
 * otherwise -> escalate
 
-Only an escalation that reaches the executor may become reviewer-backed P6
-memory.  Calls resolved automatically by P4/P7 are removed from P6's pending
-list so their execution is not mistaken for reviewer approval on a later turn.
+P6 is consulted last, and always evaluated so its memory stays current:
+
+* a remembered reviewer denial -> deny, whatever the gates said
+* gates approve or deny -> that decision stands; a gate approval is written to
+  P6 memory (source "p4"/"p7") so later covered calls can reuse it
+* gates escalate -> P6's decision (reuse approve, or escalate to the reviewer)
+
+Gate-sourced memory supports exact-cover reuse only; only reviewer-approved
+records can ground drill-downs.  Calls resolved automatically are removed from
+P6's pending list so their execution is not mistaken for reviewer approval.
 """
 
 from copy import deepcopy
@@ -31,7 +36,7 @@ def _unpack(result):
 
 
 class P4P6P7CombinedOrPolicy(Policy):
-    """Reuse reviewer decisions, then combine P4 and P7 permissively."""
+    """Combine P4 and P7 permissively, then let P6 reuse remembered approvals."""
 
     name = "p4_p6_p7_combined_or"
 
@@ -47,29 +52,29 @@ class P4P6P7CombinedOrPolicy(Policy):
             "provenance": deepcopy(state.get("provenance", {})),
         }
 
-        reuse_decision, state["reuse"], reuse_info = self._evaluate_component(
-            "P6 approval reuse", self.reuse, context, state["reuse"]
-        )
-        if reuse_decision in {"approve", "deny"}:
-            return reuse_decision, state, self._info(
-                f"P6 reused an earlier reviewer {reuse_decision} decision.",
-                reuse_decision,
-                None,
-                None,
-                reuse_info,
-                None,
-                None,
-            )
-
         plan_decision, state["plan"], plan_info = self._evaluate_component(
             "P4 plan consistency", self.plan, context, state["plan"]
         )
         provenance_decision, state["provenance"], provenance_info = self._evaluate_component(
             "P7 provenance", self.provenance, context, state["provenance"]
         )
-        final_decision = self._permissive_or(
+        gate_decision = self._permissive_or(
             plan_decision, provenance_decision, provenance_info
         )
+        reuse_decision, state["reuse"], reuse_info = self._evaluate_component(
+            "P6 approval reuse", self.reuse, context, state["reuse"]
+        )
+
+        recorded = None
+        if reuse_decision == "deny":
+            final_decision = "deny"
+        elif gate_decision == "escalate":
+            final_decision = reuse_decision
+        else:
+            final_decision = gate_decision
+            if gate_decision == "approve" and reuse_decision != "approve":
+                recorded = "p7" if provenance_decision == "approve" else "p4"
+                self.reuse.record_external_approval(context, state["reuse"], recorded)
 
         # P6 appended the current call as pending when it escalated.  It must
         # remain pending only when the executor will actually call a reviewer.
@@ -77,10 +82,10 @@ class P4P6P7CombinedOrPolicy(Policy):
             self._discard_current_pending(context, state["reuse"])
 
         reason = (
-            f"P6 returned {reuse_decision}; permissive OR of P4={plan_decision} "
-            f"and P7={provenance_decision} returned {final_decision}."
+            f"P4={plan_decision} OR P7={provenance_decision} gave {gate_decision}; "
+            f"P6 returned {reuse_decision}; final {final_decision}."
         )
-        return final_decision, state, self._info(
+        info = self._info(
             reason,
             reuse_decision,
             plan_decision,
@@ -89,6 +94,8 @@ class P4P6P7CombinedOrPolicy(Policy):
             plan_info,
             provenance_info,
         )
+        info["evidence"]["recorded_gate_approval"] = recorded
+        return final_decision, state, info
 
     @staticmethod
     def _evaluate_component(label, policy, context, state):
@@ -146,7 +153,7 @@ class P4P6P7CombinedOrPolicy(Policy):
                 "p7_approved": float(provenance_decision == "approve"),
             },
             "evidence": {
-                "combination": "p6_reuse_then_p4_or_p7",
+                "combination": "p4_or_p7_then_p6_reuse",
                 "components": components,
             },
         }
