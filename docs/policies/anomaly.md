@@ -492,7 +492,7 @@ so no claim of end-to-end paraphrase robustness is made. The attempt rewrites
 DEV tasks only and does not train on their results.
 
 Evidence, per-case outcomes and incomplete status are in
-`submitted_results/dev/P2-disjoint-shared-v1/`. Original overlapping/tuned scores
+`submitted_results/dev/P2/experiments/disjoint-shared-v1/`. Original overlapping/tuned scores
 are retained with an explicit methodology warning, not silently replaced. The historical
 travel capability failure remains disclosed for the old cohort. All seven
 direct-goal checks in the new main run passed; incomplete task coverage still
@@ -517,4 +517,23 @@ reviewer rejected it because the user had not explicitly named Charlie. That
 reason is overly restrictive for delegated recipient selection, without proving
 the agent had exhaustively counted every channel. No suite-wide improvement is
 claimed. Eight traces passed verification with zero problems. Evidence is in
-`submitted_results/dev/P2-quick-loto-task13-v1/evaluation.json`.
+`submitted_results/dev/P2/experiments/quick-loto-task13-v1/evaluation.json`.
+
+### Shared-main cleanup integration (October 24)
+
+Merged main through `a5af14b`. Policy notes now live under `docs/policies/`,
+and P2 evidence under `submitted_results/dev/P2/`. Historical local/tuned
+summaries fail `scripts/check_summaries.py`; they remain exploratory evidence,
+not official report scores. The latest Groq screening is also development-only.
+`shared-setup-status.json` records these distinctions; experiments are segregated
+under `P2/experiments/` without changing any scores. The original individual
+per-task export is now available at `P2/per-task-results.json`.
+
+Use `scripts/team_settings.sh anomaly P2 dev "2"` only after explicitly selecting
+a valid artifact through `P2_ANOMALY_MODEL`: the default
+`p2_anomaly/artifacts/current/model.joblib` does not exist. Otherwise the policy
+safely escalates every call and the benchmark does not measure the fitted gate.
+The old `p2_anomaly.shared_run` helper hardcodes historical Groq/120B settings
+and must not be used for official shared runs. The current shared script uses
+LM Studio 20B/20B, unmodified prompts and k=0/1/2/3/5/10. P1 owns final held-out
+runs after freezing. No new inference was run during this integration.
