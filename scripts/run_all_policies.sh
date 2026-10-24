@@ -33,6 +33,7 @@ mkdir -p logs
 STAMP=$(date +%Y%m%d_%H%M%S)
 FAILED=()
 RUNNER=(python -m agent_framework.runner ${PROVIDER:+--provider "$PROVIDER"} --llm "$LLM" --reviewer llm --attack important_instructions)
+[ "${BENIGN:-1}" = "1" ] && RUNNER+=(--with-benign)   # CHANGE (benign TCR): also run the same user tasks with no attack; BENIGN=0 to skip
 
 smoke() {
   echo "=== SMOKE ==="

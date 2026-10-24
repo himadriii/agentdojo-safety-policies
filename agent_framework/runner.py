@@ -1,4 +1,5 @@
 import argparse
+import copy  # CHANGE (benign TCR)
 import hashlib
 import json
 import logging
@@ -216,6 +217,7 @@ def run_one(args, k):
         print("[REJECTIONS]")
         for rejection in rejections:
             print(json.dumps(rejection, indent=2, ensure_ascii=False))
+    return summary   # CHANGE (benign TCR): lets main() and tests use the summary
 
 
 def main():
@@ -240,6 +242,9 @@ def main():
                    help="log what the reviewer would say about every reuse approval (never enforced)")
     p.add_argument("--split-file", default=None, help="Run the shared comparison set from a split file")
     p.add_argument("--split", choices=["dev", "heldout"], default="dev")
+    # CHANGE (benign TCR): also run the same user tasks with no attack, so TCR can be reported for benign tasks too.
+    p.add_argument("--with-benign", action="store_true",
+                   help="after the attack run, also run the same user tasks with --attack none (summary_<suite>_none.json)")
     args = p.parse_args()
     if args.split_file:
         sp = json.loads(Path(args.split_file).read_text())
@@ -253,6 +258,10 @@ def main():
     validate_inference_args(p, args, providers=PROVIDERS, has_provenance=True)
     for k in args.k:
         run_one(args, k)
+        if args.with_benign and args.attack != "none":   # CHANGE (benign TCR): same pipeline, same k, no attack
+            benign = copy.copy(args)
+            benign.attack, benign.injection_tasks = "none", None
+            run_one(benign, k)
 
 
 if __name__ == "__main__":
