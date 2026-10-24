@@ -2,6 +2,7 @@ from functools import partial
 
 from agent_framework.policy import FullApprovePolicy, FullEscalatePolicy
 from agent_framework.policies.supervised_risk import SupervisedRiskPolicy
+from agent_framework.policies.supervised_risk_urlguard import SupervisedRiskURLGuardPolicy
 from agent_framework.policies.approval_reuse.policy import ApprovalReusePolicy
 from agent_framework.policies.approval_reuse.similarity import SimilarityReusePolicy
 from agent_framework.policies.plan_consistency import PlanConsistencyPolicy
@@ -17,6 +18,7 @@ POLICIES = {
     "full_approve": FullApprovePolicy,
     "full_escalate": FullEscalatePolicy,
     "supervised_risk": SupervisedRiskPolicy,
+    "supervised_risk_urlguard": SupervisedRiskURLGuardPolicy,
     "approval_reuse": ApprovalReusePolicy,
     "similarity_reuse": SimilarityReusePolicy,
     "plan_consistency": PlanConsistencyPolicy,
