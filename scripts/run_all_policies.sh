@@ -55,7 +55,7 @@ smoke() {
 
 run_split() {   # $1 = dev | heldout
   local SPLIT=$1
-  echo "=== ${SPLIT^^}: policies=[$POLICIES] k=[$KS] suites=[$SUITES] owner=$OWNER ==="
+  echo "=== ${SPLIT}: policies=[$POLICIES] k=[$KS] suites=[$SUITES] owner=$OWNER ==="
   for P in $POLICIES; do
     K="$KS"; [ "$P" = "full_approve" ] && K="0"
     echo "--- $SPLIT $P (k: $K)"
