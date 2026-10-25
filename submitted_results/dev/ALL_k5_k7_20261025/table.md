@@ -27,4 +27,4 @@ HITL completed counts reviewer calls in safely completed attacked episodes; tota
 
 Frozen source and P2 artifact details are in run-configuration.json. The endpoint changed after an access failure; completed cases were retained, and the endpoint history is recorded in validation.json. Hosting, quantization and sampling are not guaranteed identical across endpoint hosts.
 
-DEV results support development comparisons, not an unbiased final estimate. Capability checks are included in the raw traces and must be considered when interpreting attack resistance. Held-out results will be published separately after validation.
+DEV results support development comparisons, not an unbiased final estimate. Capability checks are included in the raw traces and must be considered when interpreting attack resistance. [Validated held-out results are now available](../../heldout/ALL_k5_k7_20261025/table.md). [View both splits together](../../ALL_k5_k7_20261025/).
