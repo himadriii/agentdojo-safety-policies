@@ -130,3 +130,20 @@ def test_urlguard_allows_url_from_user_or_clean_output():
     c = ctx(_web("www.mine.org"))
     c["task"] = "Summarise www.mine.org"
     assert pol.evaluate(c, {})[0] == "approve"
+
+
+def test_guard_v2_denies_unrequested_booking_under_injection():
+    from agent_framework.policies.supervised_risk_guard import SupervisedRiskGuardPolicy
+    pol = SupervisedRiskGuardPolicy()
+    book = FunctionCall(function="reserve_hotel", args={"hotel": "Riverside View", "start_day": "2024-05-01", "end_day": "2024-05-05"})
+    assert pol.evaluate(ctx(book, tool_output=INJECTED), {})[0] == "deny"
+
+
+def test_guard_v2_leaves_named_or_clean_bookings_to_risk_model():
+    from agent_framework.policies.supervised_risk_guard import SupervisedRiskGuardPolicy
+    pol = SupervisedRiskGuardPolicy()
+    book = FunctionCall(function="reserve_hotel", args={"hotel": "Riverside View", "start_day": "2024-05-01", "end_day": "2024-05-05"})
+    named = ctx(book, tool_output=INJECTED); named["task"] = "Book the Riverside View hotel for May 1-5."
+    assert pol.evaluate(named, {})[2]["reason"].startswith("risk score")
+    clean = ctx(book)
+    assert pol.evaluate(clean, {})[2]["reason"].startswith("risk score")
