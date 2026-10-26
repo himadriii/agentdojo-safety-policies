@@ -72,6 +72,12 @@ class AnomalyPolicy(Policy):
             if support_error:
                 return 'escalate', state, {'reason': f'anomaly coverage: {support_error}',
                                           'scores': {'fallback': 1.0}}
+            if self.artifact.get('detector_enabled', True) is False:
+                if context['proposed_call'].function in self.artifact.get('review_required_tools', ()):
+                    return 'escalate', state, {'reason': 'sensitive action requires review; detector disabled',
+                                              'scores': {'detector_enabled': 0.0}}
+                return 'approve', state, {'reason': 'generic rules and coverage passed; detector disabled',
+                                          'scores': {'detector_enabled': 0.0}}
             score = float(-self.artifact['model'].score_samples([vector])[0])
             if not math.isfinite(score):
                 raise ValueError('invalid score')
