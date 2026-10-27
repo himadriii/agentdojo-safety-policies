@@ -11,6 +11,10 @@ AI6101 Group Project 1. We implement and evaluate approval policies for LLM agen
 - Baselines `full_approve` and `full_escalate`, plus the team's policies (see below)
 - Automated tests that run offline
 
+Hosting the shared model: [P5 Inference Gateway](p5_inferencing/README.md) documents
+LM Studio model loading, the authenticated gateway, ngrok tunneling, client IP
+restrictions, and host/client configuration using `.env.example` files.
+
 ## Shared setup (read this before running anything for results)
 
 All results that go into the report must use **one** setup, so that policies are compared fairly:

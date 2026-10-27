@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="640" viewBox="0 0 1600 640" role="img" aria-labelledby="title description">
+  <title id="title">P5 Inference Gateway architecture</title>
+  <desc id="description">AgentDojo clients send HTTPS requests with a bearer key to the ngrok edge. An outbound TLS tunnel connects the edge to the laptop's ngrok agent, which forwards to the authenticated gateway at 127.0.0.1 port 8000. The gateway calls LM Studio at 127.0.0.1 port 1234 to run GPT-OSS 20B. Optional client IP matching happens at the ngrok edge.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0 0L8 4L0 8" fill="#2563eb"/>
+    </marker>
+    <style>
+      text { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .title { font-size: 31px; font-weight: 700; fill: #102a43; }
+      .subtitle { font-size: 17px; fill: #52677d; }
+      .label { font-size: 12px; font-weight: 700; letter-spacing: 1.8px; fill: #52677d; }
+      .heading { font-size: 21px; font-weight: 650; fill: #102a43; }
+      .body { font-size: 15px; fill: #38536d; }
+      .small { font-size: 13px; fill: #52677d; }
+      .mono { font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-size: 13px; fill: #38536d; }
+      .link { fill: none; stroke: #2563eb; stroke-width: 2.5; marker-end: url(#arrow); }
+    </style>
+  </defs>
+  <rect width="1600" height="640" fill="#fff"/>
+  <text x="40" y="53" class="title">One model host. Authenticated access for the team.</text>
+  <text x="40" y="86" class="subtitle">Requests flow left to right; JSON and streaming responses return along the same path.</text>
+
+  <rect x="315" y="120" width="290" height="400" rx="18" fill="#eff6ff" stroke="#93b4ee" stroke-dasharray="6 5"/>
+  <text x="340" y="151" class="label">PUBLIC NGROK EDGE</text>
+  <rect x="640" y="120" width="920" height="400" rx="18" fill="#f5f8fc" stroke="#c5d2df"/>
+  <text x="670" y="151" class="label">INFERENCE HOST · LAPTOP</text>
+  <text x="670" y="183" class="body">The agent establishes an outbound TLS tunnel. No router port forwarding.</text>
+  <text x="40" y="151" class="label">AUTHORIZED CLIENTS</text>
+
+  <rect x="40" y="225" width="240" height="145" rx="12" fill="#fff" stroke="#b8c9db" stroke-width="1.5"/>
+  <rect x="40" y="225" width="5" height="145" rx="2" fill="#2563eb"/>
+  <text x="62" y="261" class="heading">AgentDojo clients</text>
+  <text x="62" y="294" class="body">Agent · reviewer · policies</text>
+  <text x="62" y="326" class="mono">Authorization: Bearer …</text>
+  <text x="62" y="351" class="small">Shared gateway key</text>
+
+  <rect x="340" y="225" width="240" height="145" rx="12" fill="#fff" stroke="#93b4ee" stroke-width="1.5"/>
+  <text x="362" y="261" class="heading">HTTPS endpoint</text>
+  <text x="362" y="294" class="mono">&lt;domain&gt;.ngrok.app/v1</text>
+  <text x="362" y="326" class="body">Optional source-IP policy</text>
+  <text x="362" y="351" class="small">Public TLS terminates here</text>
+
+  <rect x="675" y="225" width="225" height="145" rx="12" fill="#fff" stroke="#b8c9db" stroke-width="1.5"/>
+  <text x="697" y="261" class="heading">ngrok agent</text>
+  <text x="697" y="294" class="body">Outbound connection</text>
+  <text x="697" y="326" class="body">Forwards to gateway</text>
+  <text x="697" y="351" class="small">Inspection disabled</text>
+
+  <rect x="970" y="225" width="225" height="145" rx="12" fill="#eaf7f4" stroke="#70b8a4" stroke-width="1.5"/>
+  <text x="992" y="261" class="heading">P5 gateway</text>
+  <text x="992" y="294" class="mono">127.0.0.1:8000</text>
+  <text x="992" y="326" class="small">Bearer auth · model mapping</text>
+  <text x="992" y="351" class="small">Bounded inference slots</text>
+
+  <rect x="1265" y="225" width="255" height="145" rx="12" fill="#fff" stroke="#b8c9db" stroke-width="1.5"/>
+  <text x="1287" y="261" class="heading">LM Studio</text>
+  <text x="1287" y="294" class="mono">127.0.0.1:1234/v1</text>
+  <text x="1287" y="326" class="mono">openai/gpt-oss-20b</text>
+  <text x="1287" y="351" class="small">Inference stays on the laptop</text>
+
+  <path d="M280 290H331" class="link"/>
+  <text x="284" y="279" class="small">HTTPS</text>
+  <path d="M580 290H666" class="link"/>
+  <text x="594" y="279" class="small">TLS tunnel</text>
+  <path d="M900 290H961" class="link"/>
+  <text x="911" y="279" class="small">HTTP</text>
+  <path d="M1195 290H1256" class="link"/>
+  <text x="1208" y="279" class="small">HTTP</text>
+  <text x="340" y="410" class="small">Checks public client egress IP,</text>
+  <text x="340" y="432" class="small">not the laptop's private IP.</text>
+  <text x="675" y="413" class="small">Gateway and backend listen on loopback only.</text>
+  <text x="675" y="438" class="small">Client key, ngrok agent token and backend token are separate credentials.</text>
+  <text x="675" y="481" class="small">LM Studio weights and host secrets are not part of the repository.</text>
+
+  <rect x="40" y="550" width="1520" height="59" rx="10" fill="#102a43"/>
+  <text x="62" y="585" fill="#fff" font-size="15" font-weight="600">Access boundary</text>
+  <text x="216" y="585" fill="#d4e2f1" font-size="15">An allowed source IP still needs the gateway key. Public HTTPS through ngrok is not direct end-to-end TLS to LM Studio.</text>
+</svg>
