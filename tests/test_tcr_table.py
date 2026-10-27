@@ -41,3 +41,30 @@ def test_attack_only_run_has_no_benign(tmp_path):
     write(run, "slack", "important_instructions", {"a|1": True, "a|2": False}, 1, 2)
     [row] = tcr_table.table(tcr_table.load_runs([tmp_path]))
     assert row["n_benign"] == 0 and row["tcr_benign"] is None and row["tcr_pooled"] == row["tcr_attack"] == 0.5
+
+
+def test_policy_label_and_separate_suite_folders_are_pooled(tmp_path):
+    run = tmp_path / "lmstudio-openai_gpt-oss-20b-full_escalate-llmv2-k2-abc"
+    workspace = tmp_path / "lmstudio-openai_gpt-oss-20b-full_escalate-llmv2-k2-abc-workspace"
+    write(run, "slack", "important_instructions", {"a|1": True}, 1, 1)
+    write(workspace, "workspace", "important_instructions", {"b|1": False}, 0, 0)
+
+    [row] = tcr_table.table(tcr_table.load_runs([tmp_path]))
+
+    assert row["run"] == row["policy"] == "full_escalate"
+    assert (row["n_attack"], row["tcr_attack"]) == (2, 0.5)
+
+
+def test_html_export_is_copy_friendly_and_escaped(tmp_path):
+    run = tmp_path / "run"
+    write(run, "slack", "important_instructions", {"a|1": True, "b|1": False}, 1, 2)
+    rows = tcr_table.table(tcr_table.load_runs([tmp_path]))
+    rows[0]["policy"] = "a < b"
+    output = tmp_path / "table.html"
+
+    tcr_table.write_html(rows, output)
+    page = output.read_text(encoding="utf-8")
+
+    assert "<table>" in page and "Attack TCR" in page
+    assert "a &lt; b" in page and "a < b" not in page
+    assert "0.500" in page

@@ -15,6 +15,7 @@
 #   OWNER=ALL                results go to results/<dev|heldout|smoke>/$OWNER (git-ignored)
 #   LLM=openai/gpt-oss-20b   agent model (the reviewer follows it)
 #   PROVIDER=lmstudio        one-off override of LLM_PROVIDER from .env
+#   PYTHON=python             Python executable (useful when Bash is running under WSL)
 # Re-running is safe: finished runs are cached by pipeline name and skipped. A failing policy does not stop the
 # loop; failures are listed at the end and the script exits non-zero.
 set -uo pipefail
@@ -24,6 +25,7 @@ KS=${KS:-"0 1 2 3 5 8 10 15"}
 SUITES=${SUITES:-"workspace banking slack travel"}
 OWNER=${OWNER:-ALL}
 LLM=${LLM:-openai/gpt-oss-20b}
+PYTHON=${PYTHON:-python}
 POLICIES=${POLICIES:-"full_approve full_escalate anomaly supervised_risk supervised_risk_urlguard approval_reuse similarity_reuse plan_consistency provenance p4_p6_p7_combined_or"}
 
 # Every policy must be judged by the same reviewer: drop any stale REVIEWER_* / PROVENANCE_* shell variables.
@@ -32,13 +34,13 @@ for v in $(compgen -v | grep -E '^(REVIEWER|PROVENANCE)_' || true); do unset "$v
 mkdir -p logs
 STAMP=$(date +%Y%m%d_%H%M%S)
 FAILED=()
-RUNNER=(python -m agent_framework.runner ${PROVIDER:+--provider "$PROVIDER"} --llm "$LLM" --reviewer llm --attack important_instructions)
+RUNNER=("$PYTHON" -m agent_framework.runner ${PROVIDER:+--provider "$PROVIDER"} --llm "$LLM" --reviewer llm --attack important_instructions)
 [ "${BENIGN:-1}" = "1" ] && RUNNER+=(--with-benign)   # CHANGE (benign TCR): also run the same user tasks with no attack; BENIGN=0 to skip
 
 smoke() {
   echo "=== SMOKE ==="
   echo "--- offline contract tests (every registered policy)"
-  if python -m pytest tests/test_policy_contract_all.py tests/test_executor_contract.py -q > "logs/smoke_contract_${STAMP}.log" 2>&1; then
+  if "$PYTHON" -m pytest tests/test_policy_contract_all.py tests/test_executor_contract.py -q > "logs/smoke_contract_${STAMP}.log" 2>&1; then
     echo "OK   contract tests"
   else
     echo "FAIL contract tests -> logs/smoke_contract_${STAMP}.log"; FAILED+=("smoke:contract-tests")
