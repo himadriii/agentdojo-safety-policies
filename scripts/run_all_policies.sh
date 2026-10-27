@@ -21,7 +21,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 MODE=${1:-all}
 KS=${KS:-"0 1 2 3 5 8 10 15"}
-SUITES=${SUITES:-"banking slack travel"}
+SUITES=${SUITES:-"workspace banking slack travel"}
 OWNER=${OWNER:-ALL}
 LLM=${LLM:-openai/gpt-oss-20b}
 POLICIES=${POLICIES:-"full_approve full_escalate anomaly supervised_risk supervised_risk_urlguard approval_reuse similarity_reuse plan_consistency provenance p4_p6_p7_combined_or"}

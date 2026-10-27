@@ -1,6 +1,7 @@
 """Pooled TCR table: attack runs + benign (no-attack) runs, per policy and k, summed over suites.
 
 Usage:  python scripts/tcr_table.py results/dev/ALL [results/dev/P1 ...] [--csv out.csv]
+        [--suites banking slack travel | --exclude-suites workspace] [--split heldout] [--by-suite]
 
 Each run folder holds summary_<suite>_<attack>.json (attack runs) and summary_<suite>_none.json (benign runs).
   TCR_attack = completed-safely / n over user x injection pairs (as before)
@@ -16,14 +17,30 @@ from collections import defaultdict
 from pathlib import Path
 
 
-def load_runs(folders):
-    """{run_name: {"policy","k","reviewer","attack": [summaries], "benign": [summaries]}} from every summary file under the folders."""
-    runs = {}
+def load_runs(folders, suites=None, exclude_suites=None, split=None, by_suite=False):
+    """{run_name: {"policy","k","reviewer","suite","attack": [summaries], "benign": [summaries]}} from every summary file under the folders.
+
+    suites / exclude_suites filter on the summary's "suite"; split filters on its "split" (dev / heldout).
+    by_suite=True keeps one row per (run, suite) instead of pooling the suites of a run.
+    A (run folder, suite, attack) seen twice (the same run copied into two folders) is counted once.
+    """
+    runs, seen = {}, set()
     for root in folders:
         for path in sorted(Path(root).rglob("summary_*.json")):
             s = json.loads(path.read_text())
-            name = path.parent.name
-            run = runs.setdefault(name, {"policy": s["policy"], "k": s["k"], "reviewer": s["reviewer"], "attack": [], "benign": []})
+            suite = s.get("suite", "?")
+            if (suites and suite not in suites) or (exclude_suites and suite in exclude_suites):
+                continue
+            if split and s.get("split") != split:
+                continue
+            key = (path.parent.name, suite, s["attack"])
+            if key in seen:
+                print(f"warning: duplicate summary skipped: {path}", file=sys.stderr)
+                continue
+            seen.add(key)
+            name = f"{path.parent.name} [{suite}]" if by_suite else path.parent.name
+            run = runs.setdefault(name, {"policy": s["policy"], "k": s["k"], "reviewer": s["reviewer"],
+                                         "suite": suite if by_suite else "pooled", "attack": [], "benign": []})
             run["benign" if s["attack"] == "none" else "attack"].append(s)
     return runs
 
@@ -55,7 +72,7 @@ def table(runs):
                 for i in range(3):
                     tok[comp][i] += v[i]
         rows.append({
-            "run": name, "policy": r["policy"], "reviewer": r["reviewer"], "k": r["k"],
+            "run": name, "suite": r["suite"], "policy": r["policy"], "reviewer": r["reviewer"], "k": r["k"],
             "n_attack": na, "tcr_attack": da / na if na else None,
             "n_benign": nb, "tcr_benign": db / nb if nb else None,
             "n_pooled": na + nb, "tcr_pooled": (da + db) / (na + nb) if na + nb else None,
@@ -73,11 +90,15 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("folders", nargs="+")
     ap.add_argument("--csv")
+    ap.add_argument("--suites", nargs="+", help="only these suites, e.g. banking slack travel")
+    ap.add_argument("--exclude-suites", nargs="+", help="drop these suites, e.g. workspace")
+    ap.add_argument("--split", choices=["dev", "heldout"], help="only summaries of this split")
+    ap.add_argument("--by-suite", action="store_true", help="one row per policy, k and suite instead of pooling suites")
     args = ap.parse_args(argv)
-    rows = table(load_runs(args.folders))
+    rows = table(load_runs(args.folders, args.suites, args.exclude_suites, args.split, args.by_suite))
     print(f"{'policy':26s} {'k':>3s} | {'nA':>3s} {'TCR_att':>7s} | {'nB':>3s} {'TCR_ben':>7s} | {'n':>3s} {'TCR_pool':>8s} | {'HITL':>5s} | tokens agent/policy/reviewer")
     for r in rows:
-        print(f"{r['policy']:26s} {r['k']:>3d} | {r['n_attack']:>3d} {_f(r['tcr_attack']):>7s} | {r['n_benign']:>3d} {_f(r['tcr_benign']):>7s} | "
+        print(f"{r['policy'] + ('/' + r['suite'] if args.by_suite else ''):26s} {r['k']:>3d} | {r['n_attack']:>3d} {_f(r['tcr_attack']):>7s} | {r['n_benign']:>3d} {_f(r['tcr_benign']):>7s} | "
               f"{r['n_pooled']:>3d} {_f(r['tcr_pooled']):>8s} | {r['hitl_completed_pooled']:>5d} | {r['agent_tokens']}/{r['policy_tokens']}/{r['reviewer_tokens']}")
     if any(r["n_benign"] == 0 for r in rows):
         print("\nnote: runs with nB=0 have no benign (no-attack) results yet; their pooled TCR equals the attack TCR. "
