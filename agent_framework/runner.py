@@ -50,6 +50,15 @@ def build_pipeline(llm_name, policy_name, reviewer_name, k, provider="openai", r
                    shadow_audit=False):
     if not llm_name or not llm_name.strip():
         raise ValueError("llm_name must not be blank")
+    anomaly_policy = None
+    if policy_name == "anomaly":
+        anomaly_policy = POLICIES[policy_name]()
+        if anomaly_policy.artifact is None:
+            raise ValueError(
+                f"Anomaly model failed to load ({anomaly_policy.load_error}) at "
+                f"{anomaly_policy.artifact_path}. Set P2_ANOMALY_MODEL to a compatible "
+                "model.joblib. Refusing to benchmark fallback escalation as anomaly detection."
+            )
     if provider == "groq":
         llm = make_groq_llm(llm_name)
     else:
@@ -75,7 +84,7 @@ def build_pipeline(llm_name, policy_name, reviewer_name, k, provider="openai", r
         )
         inference_config["policy"] = {"provider": policy_provider, "model": policy_model}
     else:
-        policy = POLICIES[policy_name]()
+        policy = anomaly_policy if anomaly_policy is not None else POLICIES[policy_name]()
     if reviewer_name in ("llm", "local_llm"):
         reviewer_provider, reviewer_model = component_settings(
             "REVIEWER", provider, llm_name, reviewer_model
@@ -102,7 +111,13 @@ def build_pipeline(llm_name, policy_name, reviewer_name, k, provider="openai", r
     ])
     # Separate local and hosted results, including policy/reviewer model overrides.
     pipeline.inference_config = inference_config
-    config_key = hashlib.sha256(json.dumps(inference_config, sort_keys=True).encode()).hexdigest()[:10]
+    cache_config = dict(inference_config)
+    if anomaly_policy is not None:
+        pipeline.anomaly_model = {"sha256": anomaly_policy.artifact_hash,
+                                  "artifact": str(anomaly_policy.artifact_path)}
+        # A loaded model must never reuse traces from the old unavailable-model fallback.
+        cache_config["anomaly_model_sha256"] = anomaly_policy.artifact_hash
+    config_key = hashlib.sha256(json.dumps(cache_config, sort_keys=True).encode()).hexdigest()[:10]
     reviewer_tag = f"{reviewer_name}{REVIEWER_PROMPT_VERSION}" if reviewer_name == "llm" else reviewer_name
     pipeline.name = (
         f"{provider}-{llm_name}-{policy_name}-{reviewer_tag}-k{k}-{config_key}"
@@ -208,6 +223,8 @@ def run_one(args, k):
         "rows": rows,
         "split_file": args.split_file, "split": args.split
     }
+    if hasattr(pipeline, "anomaly_model"):
+        summary["anomaly_model"] = pipeline.anomaly_model
     out = logdir / pipeline.name
     out.mkdir(parents=True, exist_ok=True)
     (out / f"summary_{suite.name}_{attack_name}.json").write_text(json.dumps(summary, indent=2))
