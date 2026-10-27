@@ -13,7 +13,7 @@ from agent_framework.policies.anomaly_support import unsupported_reason
 from agent_framework.policies.anomaly_context import TRANSFORM, context_guard, transform_features
 from agent_framework.policies.anomaly_authorization import SUPPORTED_VERSIONS, authorization_guard
 
-DEFAULT_ARTIFACT = Path(__file__).resolve().parents[2] / 'p2_anomaly/artifacts/current/model.joblib'
+DEFAULT_ARTIFACT = Path(__file__).resolve().parents[2] / 'p2_anomaly/artifacts/development/disjoint-v1/detector_generic/model.joblib'
 
 
 class AnomalyPolicy(Policy):
@@ -23,8 +23,9 @@ class AnomalyPolicy(Policy):
         self.artifact = None
         self.load_error = None
         self.artifact_hash = None
+        self.artifact_path = Path(artifact_path or os.environ.get('P2_ANOMALY_MODEL', DEFAULT_ARTIFACT))
         try:
-            path = Path(artifact_path or os.environ.get('P2_ANOMALY_MODEL', DEFAULT_ARTIFACT))
+            path = self.artifact_path
             self.artifact_hash = hashlib.sha256(path.read_bytes()).hexdigest()
             manifest_path = path.parent / 'manifest.json'
             if manifest_path.exists():

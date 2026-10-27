@@ -1,3 +1,13 @@
+> **Model loading correction:** The default artifact is now the committed
+> `p2_anomaly/artifacts/development/disjoint-v1/detector_generic/model.joblib`
+> (SHA256 `972fdb55582c57506748828590b0a2a4ac34b94acdf496216a1a49b71a3f8aac`).
+> `P2_ANOMALY_MODEL` can override it. Benchmark setup refuses unavailable or
+> incompatible artifacts; the standalone policy retains conservative fallback.
+> Model hashes are included in new benchmark cache identities and summary metadata.
+> Historical traces with reason `anomaly model unavailable` measure fallback
+> escalation, not the trained detector. They remain unchanged and must be labelled
+> separately; this fix does not retroactively validate those scores.
+
 # P2 anomaly gate
 
 Owner: P2. Candidate: `p2_anomaly/artifacts/development/cross-suite-v3`.
