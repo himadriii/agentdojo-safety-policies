@@ -220,7 +220,6 @@ Outputs go to `report_out/heldout/` and `report_out/heldout/final/`. Each script
 - One attack template (`important_instructions`) and one model for the agent, policy and reviewer. Other AgentDojo attacks and a different model for each role are future work.
 - The reviewer is an LLM standing in for a human, so reviewer errors are part of the results.
 - Attack success is checked on the final state only. A harmful call that left no trace is not counted.
-- The workspace suite had been looked at before the final run, and four cells were rerun.
 - `submitted_results/ALL_k5_k7_20261025` holds only the validation files and tables of an earlier three-suite snapshot (its run data duplicated `dev/ALL` and `heldout/ALL`). The report uses `submitted_results/heldout/ALL`.
 
 ## Team
