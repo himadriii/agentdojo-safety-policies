@@ -1,0 +1,58 @@
+**1. Call mix of the unconstrained agent (Full-Approve, all executed calls)**
+
+| class | calls | safe | attacker's | attacker share of class | attacker tools (count) |
+|---|---:|---:|---:|---:|---:|
+| read_only | 213 | 194 | 19 | 9% | search_emails 14, read_channel_messages 4, get_users_in_channel 1 |
+| internal_reversible | 5 | 5 | 0 | 0% | - |
+| internal_irreversible | 14 | 8 | 6 | 43% | update_password 6 |
+| external_effect | 100 | 52 | 48 | 48% | send_email 26, send_money 8, invite_user_to_slack 4, create_calendar_event 4 |
+
+**2. Reviewer decisions when every call is escalated (Full-Escalate, k >= 2)**
+
+| class | escalated | attacker blocked | attacker let through | block rate | safe approved | safe wrongly denied | false-deny rate |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| read_only | 926 | 47 | 19 | 71% | 760 | 100 | 12% |
+| internal_reversible | 9 | 0 | 0 | - | 9 | 0 | 0% |
+| internal_irreversible | 29 | 29 | 0 | 100% | 0 | 0 | - |
+| external_effect | 204 | 141 | 2 | 99% | 52 | 9 | 15% |
+
+**3. How each policy handles each class (k=10)**
+
+| policy | class | calls | auto-approved | escalated | denied without reviewer | attacker auto-approved (miss) | safe calls blocked |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| full_escalate | read_only | 203 | 0 (0%) | 203 (100%) | 0 (0%) | 0 | 24 |
+| full_escalate | internal_reversible | 4 | 0 (0%) | 4 (100%) | 0 (0%) | 0 | 0 |
+| full_escalate | internal_irreversible | 6 | 0 (0%) | 6 (100%) | 0 (0%) | 0 | 0 |
+| full_escalate | external_effect | 52 | 0 (0%) | 52 (100%) | 1 (2%) | 0 | 4 |
+| anomaly | read_only | 196 | 0 (0%) | 196 (100%) | 0 (0%) | 0 | 23 |
+| anomaly | internal_reversible | 4 | 0 (0%) | 4 (100%) | 0 (0%) | 0 | 0 |
+| anomaly | internal_irreversible | 6 | 0 (0%) | 6 (100%) | 0 (0%) | 0 | 0 |
+| anomaly | external_effect | 46 | 0 (0%) | 46 (100%) | 0 (0%) | 0 | 2 |
+| approval_reuse | read_only | 198 | 62 (31%) | 136 (69%) | 0 (0%) | 3 | 22 |
+| approval_reuse | internal_reversible | 4 | 0 (0%) | 4 (100%) | 0 (0%) | 0 | 0 |
+| approval_reuse | internal_irreversible | 6 | 0 (0%) | 6 (100%) | 0 (0%) | 0 | 0 |
+| approval_reuse | external_effect | 50 | 0 (0%) | 50 (100%) | 0 (0%) | 0 | 3 |
+| p4_p6_p7_combined_or | read_only | 213 | 157 (74%) | 44 (21%) | 12 (6%) | 4 | 12 |
+| p4_p6_p7_combined_or | internal_reversible | 6 | 6 (100%) | 0 (0%) | 0 (0%) | 0 | 0 |
+| p4_p6_p7_combined_or | internal_irreversible | 6 | 0 (0%) | 0 (0%) | 6 (100%) | 0 | 0 |
+| p4_p6_p7_combined_or | external_effect | 77 | 13 (17%) | 22 (29%) | 42 (55%) | 1 | 18 |
+| plan_consistency | read_only | 201 | 37 (18%) | 164 (82%) | 0 (0%) | 3 | 22 |
+| plan_consistency | internal_reversible | 4 | 4 (100%) | 0 (0%) | 0 (0%) | 0 | 0 |
+| plan_consistency | internal_irreversible | 5 | 0 (0%) | 0 (0%) | 5 (100%) | 0 | 0 |
+| plan_consistency | external_effect | 48 | 2 (4%) | 19 (40%) | 27 (56%) | 1 | 6 |
+| provenance | read_only | 206 | 137 (67%) | 57 (28%) | 12 (6%) | 2 | 15 |
+| provenance | internal_reversible | 5 | 0 (0%) | 5 (100%) | 0 (0%) | 0 | 0 |
+| provenance | internal_irreversible | 6 | 0 (0%) | 0 (0%) | 6 (100%) | 0 | 0 |
+| provenance | external_effect | 65 | 3 (5%) | 20 (31%) | 42 (65%) | 0 | 19 |
+| similarity_reuse | read_only | 196 | 8 (4%) | 188 (96%) | 0 (0%) | 1 | 22 |
+| similarity_reuse | internal_reversible | 4 | 0 (0%) | 4 (100%) | 0 (0%) | 0 | 0 |
+| similarity_reuse | internal_irreversible | 6 | 0 (0%) | 6 (100%) | 0 (0%) | 0 | 0 |
+| similarity_reuse | external_effect | 44 | 3 (7%) | 41 (93%) | 0 (0%) | 0 | 3 |
+| supervised_risk | read_only | 212 | 212 (100%) | 0 (0%) | 0 (0%) | 20 | 0 |
+| supervised_risk | internal_reversible | 5 | 5 (100%) | 0 (0%) | 0 (0%) | 0 | 0 |
+| supervised_risk | internal_irreversible | 6 | 6 (100%) | 0 (0%) | 0 (0%) | 6 | 0 |
+| supervised_risk | external_effect | 80 | 27 (34%) | 5 (6%) | 48 (60%) | 0 | 5 |
+| supervised_risk_urlguard | read_only | 211 | 211 (100%) | 0 (0%) | 0 (0%) | 20 | 0 |
+| supervised_risk_urlguard | internal_reversible | 5 | 5 (100%) | 0 (0%) | 0 (0%) | 0 | 0 |
+| supervised_risk_urlguard | internal_irreversible | 6 | 6 (100%) | 0 (0%) | 0 (0%) | 6 | 0 |
+| supervised_risk_urlguard | external_effect | 72 | 21 (29%) | 5 (7%) | 46 (64%) | 0 | 4 |

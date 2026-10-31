@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-AI6101 group project: approval policies (gates) for LLM agents, evaluated on AgentDojo. Every tool call the agent proposes goes through one policy that returns `approve`, `deny` or `escalate`, under a per-task escalation budget `k`. Seven owners (P1–P7) each build one policy against a single shared contract owned by P1. The authoritative contract is `docs/policy_interface.md`; interface changes go through P1. `README.md` has the shared setup and the dev-run procedure.
+AI6101 group project: approval policies (gates) for LLM agents, evaluated on AgentDojo. Every tool call the agent proposes goes through one policy that returns `approve`, `deny` or `escalate`, under a per-task escalation budget `k`. Seven owners (P1–P7) each build one policy against a single shared contract owned by P1. The authoritative contract is `docs/policy_interface.md`; interface changes go through P1. `docs/team_workflow.md` has the shared setup and the dev-run procedure; `README.md` is the project overview.
 
 ## Shared setup (applies to every reported result)
 

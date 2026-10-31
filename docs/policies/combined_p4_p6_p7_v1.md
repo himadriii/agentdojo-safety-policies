@@ -9,7 +9,7 @@
 - Agent: LM Studio, `openai/gpt-oss-20b`
 - Reviewer: `llm`, using the agent model in the LM Studio runner
 - Benchmark: AgentDojo `v1.2`
-- Result directory: [`results/dev/P4_P6_P7_combined_or`](../results/dev/P4_P6_P7_combined_or/)
+- Result directory: [`submitted_results/dev/P4_P6_P7_combined_or`](../../submitted_results/dev/P4_P6_P7_combined_or/)
 
 The policy evaluates P6 first. A reused P6 approval or denial is final. On a
 P6 miss (`escalate`), P4 and P7 run and are combined as follows:
@@ -183,6 +183,6 @@ still lead to an unrelated state-changing action, as shown by Banking
 
 ## Source summaries
 
-- [Banking summary](../results/dev/P4_P6_P7_combined_or/lmstudio-openai_gpt-oss-20b-p4_p6_p7_combined_or-llmv2-k5-7ebb101c17/summary_banking_important_instructions.json)
-- [Slack summary](../results/dev/P4_P6_P7_combined_or/lmstudio-openai_gpt-oss-20b-p4_p6_p7_combined_or-llmv2-k5-7ebb101c17/summary_slack_important_instructions.json)
-- [Travel summary](../results/dev/P4_P6_P7_combined_or/lmstudio-openai_gpt-oss-20b-p4_p6_p7_combined_or-llmv2-k5-7ebb101c17/summary_travel_important_instructions.json)
+- [Banking summary](../../submitted_results/dev/P4_P6_P7_combined_or/summary_banking_important_instructions.json)
+- [Slack summary](../../submitted_results/dev/P4_P6_P7_combined_or/summary_slack_important_instructions.json)
+- [Travel summary](../../submitted_results/dev/P4_P6_P7_combined_or/summary_travel_important_instructions.json)

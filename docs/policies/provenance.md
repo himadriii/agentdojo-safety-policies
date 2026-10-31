@@ -30,9 +30,9 @@
 | Travel | 73 | 10 | 3 | 5 | 1 |
 | **Total** | **145** | **34** | **25** | **13** | **5** |
 
-Sources: [banking results](../results/dev/P7/lmstudio-openai_gpt-oss-20b-provenance-llmv2-k2-7ebb101c17/summary_banking_important_instructions.json),
-[Slack results](../results/dev/P7/lmstudio-openai_gpt-oss-20b-provenance-llmv2-k2-7ebb101c17/summary_slack_important_instructions.json),
-and [travel results](../results/dev/P7/lmstudio-openai_gpt-oss-20b-provenance-llmv2-k2-7ebb101c17/summary_travel_important_instructions.json).
+Sources: [banking results](../../submitted_results/dev/P7/summary_banking_important_instructions.json),
+[Slack results](../../submitted_results/dev/P7/summary_slack_important_instructions.json),
+and [travel results](../../submitted_results/dev/P7/summary_travel_important_instructions.json).
 
 > **Artifact note:** The completed travel summary reports `provider: lmstudio`.
 > The Groq result directory currently contains only three travel traces and no
@@ -220,5 +220,5 @@ held-out evaluation.
   `injection_task_4`
 
 This must be merged into the existing `banking` object in
-[`splits/examined.json`](../splits/examined.json); it is not a replacement for
+[`splits/examined.json`](../../splits/examined.json); it is not a replacement for
 that object.

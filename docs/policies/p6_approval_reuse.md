@@ -1,6 +1,6 @@
 # P6: Reuse of Previous Approvals
 
-Owner: P6. Plan: `docs/plans/2026-10-19-1857-feat-p6-approval-reuse-gate-plan.md`.
+Owner: P6. Plan: [`docs/archive/2026-10-19-1857-feat-p6-approval-reuse-gate-plan.md`](../archive/2026-10-19-1857-feat-p6-approval-reuse-gate-plan.md).
 
 ## Method
 

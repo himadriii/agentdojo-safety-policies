@@ -94,6 +94,6 @@ Evaluate clean and attacked runs and report false positives, false negatives,
 auto-denials, review use, and latency. It cannot replace provenance or
 argument-risk gates.
 
-See [`docs/policies/plan_consistency_dev_run.md`](plan_consistency_dev_run.md) for the
+See [`docs/archive/plan_consistency_dev_run.md`](../archive/plan_consistency_dev_run.md) for the
 development fixtures and partial clean-task utility sample, including its
 coverage limits and observed denial cases.

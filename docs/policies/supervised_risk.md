@@ -1,6 +1,6 @@
 # supervised_risk (P3)
 
-Policy name for `--policy`: `supervised_risk`. Class: `agent_framework/policies/supervised_risk.py`. The longer write-ups are `docs/policies/p3_supervised_risk.md` (technical), `docs/policies/p3_report_section.md` (report section) and `docs/policies/p3_report.md` (full report).
+Policy name for `--policy`: `supervised_risk`. Class: `agent_framework/policies/supervised_risk.py`. The full technical write-up is [`p3_supervised_risk.md`](p3_supervised_risk.md). Earlier P3 report drafts and a plain-language explainer are in [`../archive/`](../archive/).
 
 **How it works.** A random forest, trained offline on labeled tool calls from the workspace suite and calibrated, scores each proposed call from the visible context only (39 features: tool type, whether recipients and arguments trace to the user's task, injection-like text in earlier tool output, whether the task mentions the action). Risk below 0.25 approves, 0.25 up to 0.90 escalates, and 0.90 or above denies. It makes no LLM calls. The model and thresholds are in `p3_risk/artifacts/` and were fixed on Oct 17, 2026.
 

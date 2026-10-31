@@ -1,11 +1,13 @@
-# All-policy results: DEV and held-out, k=5 and k=7
+# All-policy results: DEV and held-out, k=5 and k=7 (summary snapshot)
+
+> Earlier three-suite snapshot. The full run summaries and traces for these budgets are in `../dev/ALL/k5`, `k7` and `../heldout/ALL/k5`, `k7` (identical numbers; the held-out one also has the workspace suite). Only the validation files, tables and audit notes are kept here. The final report uses `../heldout/ALL`.
 
 Agent and reviewer: **openai/gpt-oss-20b**, hosted LM Studio. Nine policies across Banking, Slack and Travel.
 
 | Results | Comparison table | Full summaries, traces and audits | Validation |
 |---|---|---|---|
-| DEV | [DEV table](../dev/ALL_k5_k7_20261025/table.md) | [DEV files](../dev/ALL_k5_k7_20261025/) | 108 summaries; 1,174 traces; 0 problems |
-| Held-out | [Held-out table](../heldout/ALL_k5_k7_20261025/table.md) | [Held-out files](../heldout/ALL_k5_k7_20261025/) | 108 summaries; 989 traces; 0 problems |
+| DEV | [DEV table](dev/table.md) | [DEV files](dev/) | 108 summaries; 1,174 traces; 0 problems |
+| Held-out | [Held-out table](heldout/table.md) | [Held-out files](heldout/) | 108 summaries; 989 traces; 0 problems |
 
 Each policy/budget uses 46 attacked cases and 20 clean tasks on DEV, and 34 attacked cases and 14 clean tasks on held-out. Scores below are kept separate by split.
 
